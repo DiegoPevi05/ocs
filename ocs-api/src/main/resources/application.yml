@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: ocs-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ocs_db
+    username: ocs_user
+    password: ocs_password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  liquibase:
+    change-log: classpath:db/migrations/db.changelog-master.yaml
+    enabled: true
+
+server:
+  port: 8080
+
+app:
+  calculator:
+    url: http://localhost:8081
+  jwt:
+    secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970 # example 256-bit key
+    expiration-ms: 86400000

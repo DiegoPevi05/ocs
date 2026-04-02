@@ -1,7 +1,10 @@
 services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────
   postgres:
     image: postgres:16
     container_name: ocs-postgres
+    restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
@@ -10,13 +13,62 @@ services:
       POSTGRES_PASSWORD: ocs_password
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocs_user -d ocs_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ── C++ Calculator engine ─────────────────────────────────────────
   ocs-calculator:
-    image: nginx:alpine
-    container_name: ocs-calculator-mock
+    build:
+      context: ./ocs-calculator
+      dockerfile: Dockerfile
+    container_name: ocs-calculator
+    restart: unless-stopped
     ports:
-      - "8081:80"
-    # This is a mock. The real C++ calculator will serve HTTP properly on 8081.
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Spring Boot API ───────────────────────────────────────────────
+  ocs-api:
+    build:
+      context: ./ocs-api
+      dockerfile: Dockerfile
+    container_name: ocs-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ocs_db
+      SPRING_DATASOURCE_USERNAME: ocs_user
+      SPRING_DATASOURCE_PASSWORD: ocs_password
+      APP_CALCULATOR_URL: http://ocs-calculator:8081
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+      APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-86400000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ocs-calculator:
+        condition: service_started
+
+  # ── React + Three.js Frontend ─────────────────────────────────────
+  ocs-web:
+    build:
+      context: ./ocs-web
+      dockerfile: Dockerfile
+    container_name: ocs-web
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - ocs-api
+    environment:
+      VITE_API_URL: http://ocs-api:8080
 
 volumes:
   pgdata:

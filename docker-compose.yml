@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ocs-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ocs_db
+      POSTGRES_USER: ocs_user
+      POSTGRES_PASSWORD: ocs_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  ocs-calculator:
+    image: nginx:alpine
+    container_name: ocs-calculator-mock
+    ports:
+      - "8081:80"
+    # This is a mock. The real C++ calculator will serve HTTP properly on 8081.
+
+volumes:
+  pgdata:

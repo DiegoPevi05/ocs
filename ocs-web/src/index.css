@@ -1,0 +1,267 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ─── Reset ─────────────────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ─── Design tokens ─────────────────────────────────────────────────────── */
+:root {
+  --bg:          #0a0e1a;
+  --surface:     #111827;
+  --surface2:    #1c2539;
+  --border:      #1e2d45;
+  --accent:      #3b82f6;
+  --accent-glow: rgba(59,130,246,0.18);
+  --text:        #e2e8f0;
+  --muted:       #64748b;
+  --success:     #22c55e;
+  --danger:      #ef4444;
+  --font:        'Inter', system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#root { height: 100vh; }
+
+/* ─── App shell ──────────────────────────────────────────────────────────── */
+.ocs-app {
+  display: grid;
+  grid-template-rows: 52px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── Navbar ─────────────────────────────────────────────────────────────── */
+.ocs-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 20;
+}
+
+.ocs-nav__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.brand-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  flex-shrink: 0;
+}
+
+.ocs-nav__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ─── 2D / 3D toggle button ─────────────────────────────────────────────── */
+.view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.view-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.view-toggle--3d   { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+
+/* ─── Body ───────────────────────────────────────────────────────────────── */
+.ocs-body {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* ─── Left toolbar ───────────────────────────────────────────────────────── */
+.ocs-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  user-select: none;
+}
+
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+
+.tool-sep {
+  width: 44px;
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+  flex-shrink: 0;
+}
+
+/* ─── Tool button ────────────────────────────────────────────────────────── */
+.tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 54px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 0.6rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tool-btn:hover:not(.tool-btn--disabled) {
+  background: var(--surface2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.tool-btn--active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tool-btn--disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.tool-btn__icon { line-height: 1; }
+.tool-btn__label { line-height: 1; letter-spacing: 0.02em; }
+
+/* ─── Legend ─────────────────────────────────────────────────────────────── */
+.toolbar-legend {
+  margin-top: auto;
+  padding-top: 12px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.toolbar-legend__title {
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legend-label {
+  font-size: 0.58rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Canvas wrapper ─────────────────────────────────────────────────────── */
+.ocs-canvas-wrap {
+  position: relative;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.ocs-canvas {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Three.js adds the canvas — let it control its own pixel dimensions */
+.ocs-canvas canvas {
+  display: block;
+}
+
+/* ─── Canvas mode badge ──────────────────────────────────────────────────── */
+.canvas-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+.canvas-badge__mode {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+.canvas-badge__mode--3d {
+  color: #a78bfa;
+}
+
+.canvas-badge__hint {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-family: var(--font);
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar         { width: 5px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }

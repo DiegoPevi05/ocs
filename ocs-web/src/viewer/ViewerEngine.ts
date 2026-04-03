@@ -41,6 +41,7 @@ export class ViewerEngine {
   private controls: OrbitControls;
   private viewMode: ViewMode = '2D';
   public drawMode: DrawMode = 'none';
+  public cantileverZigzag: number = 250;
 
   // Grid (2D)
   private gridGroup: THREE.Group;
@@ -65,7 +66,7 @@ export class ViewerEngine {
   private selectStartY: number = 0;
 
   // Track current dynamic data for rubberband & snap context
-  private dynData: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[] } = { trackPoints: [], poles: [] };
+  private dynData: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] } = { trackPoints: [], poles: [] };
   public trackMode: 'rect' | 'poly' = 'rect';
 
   // Pan state (2D)
@@ -1014,10 +1015,97 @@ export class ViewerEngine {
         const mat = new THREE.LineBasicMaterial({ color: 0xeab308 });
         this.rubberbandGroup.add(new THREE.Line(geo, mat));
       }
+    } else if (this.drawMode === 'cantilever') {
+      // Find nearest track foot + track segment direction for zigzag
+      let footX = wx, footZ = wz;
+      let minDist = Infinity;
+      let segDirX = 1, segDirZ = 0;
+
+      const sampleForFoot = (tr: { x: number, z: number, r?: number }[]) => {
+        for (let i = 1; i < tr.length; i++) {
+          const prev = tr[i - 1], curr = tr[i];
+          if (curr.r && Math.abs(curr.r) > 1) {
+            const d = Math.hypot(curr.x - prev.x, curr.z - prev.z);
+            const R = Math.abs(curr.r);
+            if (R > d / 2) {
+              const mx = (prev.x + curr.x) / 2, mz = (prev.z + curr.z) / 2;
+              const ux = (curr.x - prev.x) / d, uz = (curr.z - prev.z) / d;
+              const h = Math.sqrt(R * R - (d / 2) * (d / 2));
+              const sign = curr.r > 0 ? 1 : -1;
+              const cx = mx - uz * h * sign, cz = mz + ux * h * sign;
+              const sa = Math.atan2(prev.z - cz, prev.x - cx);
+              const ea = Math.atan2(curr.z - cz, curr.x - cx);
+              for (let s = 0; s <= 32; s++) {
+                const a = sa + (ea - sa) * s / 32;
+                const qx = cx + R * Math.cos(a), qz = cz + R * Math.sin(a);
+                const dist = Math.hypot(wx - qx, wz - qz);
+                if (dist < minDist) {
+                  minDist = dist; footX = qx; footZ = qz;
+                  // tangent direction at arc point
+                  segDirX = -Math.sin(a); segDirZ = Math.cos(a);
+                  if (curr.r < 0) { segDirX = -segDirX; segDirZ = -segDirZ; }
+                }
+              }
+              continue;
+            }
+          }
+          const dx = curr.x - prev.x, dz = curr.z - prev.z;
+          const len2 = dx * dx + dz * dz;
+          if (len2 === 0) continue;
+          const t = Math.max(0, Math.min(1, ((wx - prev.x) * dx + (wz - prev.z) * dz) / len2));
+          const qx = prev.x + t * dx, qz = prev.z + t * dz;
+          const dist = Math.hypot(wx - qx, wz - qz);
+          if (dist < minDist) {
+            minDist = dist; footX = qx; footZ = qz;
+            const len = Math.hypot(dx, dz);
+            segDirX = len > 0 ? dx / len : 1; segDirZ = len > 0 ? dz / len : 0;
+          }
+        }
+      };
+
+      if (this.dynData.completedTracks) {
+        this.dynData.completedTracks.forEach(tr => sampleForFoot(tr));
+      }
+
+      if (minDist < Infinity) {
+        // Apply zigzag offset along track direction
+        const zz = this.cantileverZigzag;
+        const zfX = footX + segDirX * zz;
+        const zfZ = footZ + segDirZ * zz;
+
+        // Dashed cantilever arm: pole → track foot (zigzag-adjusted)
+        const geo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(wx, 0, wz),
+          new THREE.Vector3(zfX, 0, zfZ),
+        ]);
+        const mat = new THREE.LineDashedMaterial({ color: 0x22c55e, dashSize: 150, gapSize: 100 });
+        const line = new THREE.Line(geo, mat);
+        line.computeLineDistances();
+        this.rubberbandGroup.add(line);
+
+        // Dot at track foot (zigzag position)
+        const cgeo = new THREE.CircleGeometry(120, 16);
+        cgeo.rotateX(-Math.PI / 2);
+        const cmat = new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide });
+        const dot = new THREE.Mesh(cgeo, cmat);
+        dot.position.set(zfX, 0, zfZ);
+        dot.layers.set(1);
+        this.rubberbandGroup.add(dot);
+
+        // Thin perpendicular line from raw foot to zigzag foot (shows offset)
+        if (Math.abs(zz) > 0.1) {
+          const pgeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(footX, 0, footZ),
+            new THREE.Vector3(zfX, 0, zfZ),
+          ]);
+          const pmat = new THREE.LineBasicMaterial({ color: 0x16a34a, transparent: true, opacity: 0.5 });
+          this.rubberbandGroup.add(new THREE.Line(pgeo, pmat));
+        }
+      }
     }
   }
 
-  public setDynamicGeometry(data: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], selectedTracks?: number[], selectedPoles?: number[], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[] }): void {
+  public setDynamicGeometry(data: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], selectedTracks?: number[], selectedPoles?: number[], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] }): void {
     this.dynData = data;
     // Clear dynamic group
     this.dynamicGroup.traverse((obj) => {
@@ -1118,32 +1206,46 @@ export class ViewerEngine {
       this.dynamicGroup.add(cyl);
     });
 
-    // Render committed cantilevers as orange lines
+    // Render committed cantilevers
     if (data.cantilevers) {
-      data.cantilevers.forEach(c => {
+      data.cantilevers.forEach((c, ci) => {
+        const isSelected = data.selectedCantilevers?.includes(ci) ?? false;
+        const color = isSelected ? 0xfbbf24 : 0xf59e0b;
         const geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(c.x1, 0, c.z1),
           new THREE.Vector3(c.x2, 0, c.z2)
         ]);
-        const mat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2 });
+        const mat = new THREE.LineBasicMaterial({ color, linewidth: isSelected ? 3 : 2 });
         this.dynamicGroup.add(new THREE.Line(geo, mat));
+        if (isSelected) {
+          // Highlight dots at endpoints
+          [{ x: c.x1, z: c.z1 }, { x: c.x2, z: c.z2 }].forEach(pt => {
+            const cgeo = new THREE.CircleGeometry(120, 16);
+            cgeo.rotateX(-Math.PI / 2);
+            const cmat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(cgeo, cmat);
+            mesh.position.set(pt.x, 1, pt.z);
+            this.dynamicGroup.add(mesh);
+          });
+        }
       });
     }
 
-    // Render committed vanes as yellow lines
+    // Render committed vanes
     if (data.vanes) {
-      data.vanes.forEach(v => {
+      data.vanes.forEach((v, vi) => {
+        const isSelected = data.selectedVanes?.includes(vi) ?? false;
+        const color = isSelected ? 0xfde047 : 0xeab308;
         const geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(v.x1, 0, v.z1),
           new THREE.Vector3(v.x2, 0, v.z2)
         ]);
-        const mat = new THREE.LineBasicMaterial({ color: 0xeab308, linewidth: 2 });
+        const mat = new THREE.LineBasicMaterial({ color, linewidth: isSelected ? 3 : 2 });
         this.dynamicGroup.add(new THREE.Line(geo, mat));
-        // Small endpoint dots
         [{ x: v.x1, z: v.z1 }, { x: v.x2, z: v.z2 }].forEach(pt => {
-          const cgeo = new THREE.CircleGeometry(60, 12);
+          const cgeo = new THREE.CircleGeometry(isSelected ? 100 : 60, 12);
           cgeo.rotateX(-Math.PI / 2);
-          const cmat = new THREE.MeshBasicMaterial({ color: 0xeab308, side: THREE.DoubleSide });
+          const cmat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
           const mesh = new THREE.Mesh(cgeo, cmat);
           mesh.position.set(pt.x, 0, pt.z);
           this.dynamicGroup.add(mesh);

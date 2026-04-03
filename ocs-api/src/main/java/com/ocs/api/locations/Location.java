@@ -8,6 +8,8 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -30,9 +32,11 @@ public class Location extends BaseEntity {
     @Column(nullable = false)
     private String name;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String geoCoordinates;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "scene_data", columnDefinition = "jsonb")
     private String sceneData;
 }

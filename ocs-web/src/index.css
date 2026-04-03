@@ -109,7 +109,7 @@ body {
 /* ─── Body ───────────────────────────────────────────────────────────────── */
 .ocs-body {
   display: grid;
-  grid-template-columns: 72px 1fr;
+  grid-template-columns: 120px 1fr;
   overflow: hidden;
   height: 100%;
 }

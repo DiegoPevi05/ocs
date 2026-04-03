@@ -6,6 +6,7 @@
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/auth/LoginRequest.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/auth/SecurityConfig.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/auth/TokenResponse.java
+/home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/calculator/CalculationController.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/calculator/CalculatorClient.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/cantilevers/Cantilever.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/cantilevers/CantileverRepository.java

@@ -118,13 +118,19 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     int numCantilevers = j.value("cantileversQuantity", 1);
     double catSeparation = j.value("catSeparation", 720.0);
     double supportOffset = j.value("supportOffset", 1440.0);
-    
+    double contactWireHeight = j.value("contactWireHeight", 5400.0);
+    double systemHeight = j.value("systemHeight", 1000.0);
+    double zigzag = j.value("zigzag", 200.0);
+    double contactWireVerticalOffset = j.value("contactWireVerticalOffset", 120.0);
+
     components::Pole poleOrchestrator(pole3D, 500.0, 150.0, 4500.0, supportOffset, catSeparation, pv);
-    
+
     for (int i=0; i < numCantilevers; ++i) {
         auto builder = std::make_shared<CantileverBuilder>(
             model, track, components::CurveRadiusDirection::INSIDE, pv, pole3D,
-            0.0, 150.0, 5400.0, 120.0, 1000.0, 200.0, 1500.0, 800.0
+            0.0, supportOffset, contactWireHeight, contactWireVerticalOffset, systemHeight,
+            (i % 2 == 0) ? zigzag : -zigzag,
+            1500.0, 800.0
         );
         
         auto stayTube = std::make_shared<assemblies::StayTube>(stayTubeParams);

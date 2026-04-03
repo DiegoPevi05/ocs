@@ -1,25 +1,39 @@
+# ─── OCS Docker Compose ───────────────────────────────────────────────────────
+#
+# Environment variable resolution order (highest → lowest priority):
+#   1. Shell environment variables
+#   2. Root .env file (auto-loaded by compose for ${VAR} interpolation)
+#   3. Per-service env_file (injected into the container)
+#   4. Defaults defined below with :- syntax
+#
+# Setup:
+#   cp .env.example .env                  # edit root compose vars
+#   cp ocs-api/.env.example ocs-api/.env  # edit API vars
+#   docker compose up --build
+
 services:
 
-  # ── PostgreSQL ────────────────────────────────────────────────────
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16
     container_name: ocs-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_DB: ocs_db
-      POSTGRES_USER: ocs_user
-      POSTGRES_PASSWORD: ocs_password
+      # Read from root .env (auto-loaded by compose)
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ocs_user -d ocs_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── C++ Calculator engine ─────────────────────────────────────────
+  # ── C++ Calculator engine ─────────────────────────────────────────────────────
   ocs-calculator:
     build:
       context: ./ocs-calculator
@@ -27,14 +41,14 @@ services:
     container_name: ocs-calculator
     restart: unless-stopped
     ports:
-      - "8081:8081"
+      - "${CALCULATOR_PORT:-8081}:8081"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
       interval: 15s
       timeout: 5s
       retries: 3
 
-  # ── Spring Boot API ───────────────────────────────────────────────
+  # ── Spring Boot API ───────────────────────────────────────────────────────────
   ocs-api:
     build:
       context: ./ocs-api
@@ -42,33 +56,33 @@ services:
     container_name: ocs-api
     restart: unless-stopped
     ports:
-      - "8080:8080"
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ocs_db
-      SPRING_DATASOURCE_USERNAME: ocs_user
-      SPRING_DATASOURCE_PASSWORD: ocs_password
-      APP_CALCULATOR_URL: http://ocs-calculator:8081
-      APP_JWT_SECRET: ${APP_JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
-      APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-86400000}
+      - "${API_PORT:-8080}:8080"
+    # ocs-api/.env supplies all app vars (DB_URL, JWT_SECRET, CALCULATOR_URL, …)
+    # These override the local-dev defaults in application.yml.
+    env_file:
+      - ./ocs-api/.env
     depends_on:
       postgres:
         condition: service_healthy
       ocs-calculator:
         condition: service_started
 
-  # ── React + Three.js Frontend ─────────────────────────────────────
+  # ── React + Three.js Frontend ─────────────────────────────────────────────────
   ocs-web:
     build:
       context: ./ocs-web
       dockerfile: Dockerfile
+      args:
+        # VITE_ vars are baked into the bundle at build time (not runtime).
+        # Values come from root .env (auto-loaded) or shell environment.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+        VITE_WS_URL: ${VITE_WS_URL}
     container_name: ocs-web
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "${WEB_PORT:-5173}:80"
     depends_on:
       - ocs-api
-    environment:
-      VITE_API_URL: http://ocs-api:8080
 
 volumes:
   pgdata:

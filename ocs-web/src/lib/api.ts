@@ -1,6 +1,6 @@
 import type { Location, Project, SceneData } from '../types';
 
-const BASE = 'http://localhost:8080/api';
+const BASE = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api`;
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

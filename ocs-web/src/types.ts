@@ -44,8 +44,31 @@ export type DrawMode = 'none' | 'track' | 'pole' | 'cantilever' | 'vane';
 export interface TrackPoint { x: number; z: number; y?: number; r?: number; }
 export interface TrackData { id?: string; label: string; points: TrackPoint[]; }
 export interface PoleData { id?: string; label?: string; x: number; z: number; y?: number; h?: number; }
-export interface CantileverData { id?: string; label?: string; x1: number; z1: number; x2: number; z2: number; }
-export interface VaneData { id?: string; label?: string; x1: number; z1: number; x2: number; z2: number; }
+export interface CantileverData {
+  id?: string; label?: string;
+  x1: number; z1: number;   // pole position
+  x2: number; z2: number;   // track foot (zigzag-adjusted)
+  // Calculation params
+  contactWireHeight?: number;  // mm, default 5400
+  systemHeight?: number;       // mm, default 1000
+  zigzag?: number;             // mm, default 250 (positive = forward along track)
+  supportOffset?: number;      // mm, default 1440
+  configuration?: string;      // "TDP>2.2" | "TDP<2.2" | "CAI" | "SBA"
+}
+export interface VaneData {
+  id?: string; label?: string;
+  x1: number; z1: number;
+  x2: number; z2: number;
+  // Calculation params
+  cwWeight?: number;           // kg/m, default 0.0019
+  cwTension?: number;          // N, default 1600
+  swWeight?: number;           // kg/m, default 0.0024
+  swTension?: number;          // N, default 2000
+  initialSeparation?: number;  // mm, default 5000
+  qtyDroppers?: number;        // default 0
+  dropperWeight?: number;      // default 0.0006
+  stepSize?: number;           // default 0
+}
 export interface SceneData {
   tracks: TrackData[];
   poles: PoleData[];

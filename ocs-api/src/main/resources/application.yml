@@ -1,11 +1,14 @@
 spring:
   application:
     name: ocs-api
+
   datasource:
-    url: jdbc:postgresql://localhost:5432/ocs_db
-    username: ocs_user
-    password: ocs_password
+    # Local dev default → localhost. Docker overrides via DB_URL env var (ocs-api/.env).
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ocs_db}
+    username: ${DB_USERNAME:ocs_user}
+    password: ${DB_PASSWORD:ocs_password}
     driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: validate
@@ -14,16 +17,19 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
   liquibase:
     change-log: classpath:db/migrations/db.changelog-master.yaml
     enabled: true
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 app:
   calculator:
-    url: http://localhost:8081
+    # Local dev default → localhost. Docker overrides via CALCULATOR_URL env var.
+    url: ${CALCULATOR_URL:http://localhost:8081}
   jwt:
-    secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970 # example 256-bit key
-    expiration-ms: 86400000
+    # Dev default only — always overridden in Docker via JWT_SECRET env var.
+    secret: ${JWT_SECRET:dev-only-insecure-secret-do-not-use-in-production}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}

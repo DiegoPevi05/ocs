@@ -1,39 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  MousePointer2,
-  Minus,
-  CircleDot,
-  GitMerge,
-  Link2,
-  Box,
-  Square,
-  RotateCcw,
-  ArrowLeft,
-  Save,
+  MousePointer2, Minus, CircleDot, GitMerge, Link2,
+  Box, Square, RotateCcw, ArrowLeft, Save,
 } from 'lucide-react';
+import { Client as StompClient } from '@stomp/stompjs';
 import { ViewerEngine } from '../viewer/ViewerEngine';
 import { api, parseSceneData } from '../lib/api';
-import type { DrawMode, ViewMode, SceneData, Location } from '../types';
+import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Closest XZ point on polyline (handles arcs via sampling). */
+interface TrackFoot { x: number; z: number; tx: number; tz: number; }
+
+/** Closest XZ point on polyline + track segment direction. */
 function closestPointOnTracks(
   tracks: { x: number; z: number; y?: number; r?: number; label?: string }[][],
-  px: number,
-  pz: number
-): { x: number; z: number } {
-  let footX = px, footZ = pz, minDist = Infinity;
-
-  const checkStraight = (ax: number, az: number, bx: number, bz: number) => {
-    const dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz;
-    if (len2 === 0) return;
-    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len2));
-    const qx = ax + t * dx, qz = az + t * dz;
-    const d = Math.hypot(px - qx, pz - qz);
-    if (d < minDist) { minDist = d; footX = qx; footZ = qz; }
-  };
+  px: number, pz: number
+): TrackFoot {
+  let footX = px, footZ = pz, minDist = Infinity, tx = 1, tz = 0;
 
   tracks.forEach(tr => {
     for (let i = 1; i < tr.length; i++) {
@@ -49,7 +34,6 @@ function closestPointOnTracks(
           const cx = mx - uz * h * sign, cz = mz + ux * h * sign;
           const sa = Math.atan2(prev.z - cz, prev.x - cx);
           const ea = Math.atan2(curr.z - cz, curr.x - cx);
-          // determine sweep direction matching the arc sign convention
           let sweep = ea - sa;
           if (curr.r > 0 && sweep > 0) sweep -= 2 * Math.PI;
           if (curr.r < 0 && sweep < 0) sweep += 2 * Math.PI;
@@ -57,37 +41,46 @@ function closestPointOnTracks(
             const a = sa + sweep * s / 64;
             const qx = cx + R * Math.cos(a), qz = cz + R * Math.sin(a);
             const d = Math.hypot(px - qx, pz - qz);
-            if (d < minDist) { minDist = d; footX = qx; footZ = qz; }
+            if (d < minDist) {
+              minDist = d; footX = qx; footZ = qz;
+              const tDirX = -Math.sin(a) * (curr.r < 0 ? -1 : 1);
+              const tDirZ = Math.cos(a) * (curr.r < 0 ? -1 : 1);
+              const tLen = Math.hypot(tDirX, tDirZ);
+              tx = tLen > 0 ? tDirX / tLen : 1; tz = tLen > 0 ? tDirZ / tLen : 0;
+            }
           }
           continue;
         }
       }
-      checkStraight(prev.x, prev.z, curr.x, curr.z);
+      const dx = curr.x - prev.x, dz = curr.z - prev.z;
+      const len2 = dx * dx + dz * dz;
+      if (len2 === 0) continue;
+      const t = Math.max(0, Math.min(1, ((px - prev.x) * dx + (pz - prev.z) * dz) / len2));
+      const qx = prev.x + t * dx, qz = prev.z + t * dz;
+      const d = Math.hypot(px - qx, pz - qz);
+      if (d < minDist) {
+        minDist = d; footX = qx; footZ = qz;
+        const len = Math.sqrt(len2);
+        tx = len > 0 ? dx / len : 1; tz = len > 0 ? dz / len : 0;
+      }
     }
   });
 
-  return { x: footX, z: footZ };
+  return { x: footX, z: footZ, tx, tz };
 }
+
+// ─── Input field helper ────────────────────────────────────────────────────────
+const INP = { width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 } as const;
+const LBL = { display: 'block', marginTop: 12, fontSize: 12, color: '#94a3b8' } as const;
+const ROW = { display: 'flex', gap: 10, marginTop: 8 } as const;
 
 // ─── ToolButton ───────────────────────────────────────────────────────────────
 
-interface ToolButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-  disabled?: boolean;
-  title?: string;
-  onClick: () => void;
-}
-
-function ToolButton({ icon, label, active, disabled, title, onClick }: ToolButtonProps) {
+function ToolButton({ icon, label, active, disabled, title, onClick }: {
+  icon: React.ReactNode; label: string; active?: boolean; disabled?: boolean; title?: string; onClick: () => void;
+}) {
   return (
-    <button
-      className={`tool-btn${active ? ' tool-btn--active' : ''}${disabled ? ' tool-btn--disabled' : ''}`}
-      onClick={onClick}
-      title={title ?? label}
-      disabled={disabled}
-    >
+    <button className={`tool-btn${active ? ' tool-btn--active' : ''}${disabled ? ' tool-btn--disabled' : ''}`} onClick={onClick} title={title ?? label} disabled={disabled}>
       <span className="tool-btn__icon">{icon}</span>
       <span className="tool-btn__label">{label}</span>
     </button>
@@ -99,6 +92,19 @@ function LegendItem({ color, label }: { color: string; label: string }) {
     <div className="legend-item">
       <span className="legend-dot" style={{ background: color }} />
       <span className="legend-label">{label}</span>
+    </div>
+  );
+}
+
+// ─── Modal shell ──────────────────────────────────────────────────────────────
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 360, border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' }}>
+        <h3 style={{ marginTop: 0 }}>{title}</h3>
+        {children}
+      </div>
     </div>
   );
 }
@@ -122,29 +128,61 @@ export default function EditorPage() {
   const [completedTracks, setCompletedTracks] = useState<{ x: number; z: number; y?: number; r?: number; label?: string }[][]>([]);
   const [trackPoints, setTrackPoints] = useState<{ x: number; z: number; y?: number; r?: number }[]>([]);
   const [poles, setPoles] = useState<{ x: number; z: number; y?: number; h?: number; label?: string }[]>([]);
-  const [cantilevers, setCantilevers] = useState<{ x1: number; z1: number; x2: number; z2: number; label?: string }[]>([]);
-  const [vanes, setVanes] = useState<{ x1: number; z1: number; x2: number; z2: number; label?: string }[]>([]);
+  const [cantilevers, setCantilevers] = useState<CantileverData[]>([]);
+  const [vanes, setVanes] = useState<VaneData[]>([]);
   const [vanePoints, setVanePoints] = useState<{ x: number; z: number }[]>([]);
 
   // Selection
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
   const [selectedPoles, setSelectedPoles] = useState<number[]>([]);
-  const [selFilter, setSelFilter] = useState({ tracks: true, poles: true });
+  const [selectedCantilevers, setSelectedCantilevers] = useState<number[]>([]);
+  const [selectedVanes, setSelectedVanes] = useState<number[]>([]);
+  const [selFilter, setSelFilter] = useState({ tracks: true, poles: true, cantilevers: true, vanes: true });
 
-  // Modals
+  // Creation modals
   const [poleModal, setPoleModal] = useState<{ x: number; z: number; y: number } | null>(null);
   const [trackModal, setTrackModal] = useState<{ x: number; z: number; y?: number; r?: number }[] | null>(null);
-  const [cantileverModal, setCantileverModal] = useState<{ x1: number; z1: number; x2: number; z2: number } | null>(null);
+  const [cantileverModal, setCantileverModal] = useState<{ x1: number; z1: number; x2raw: number; z2raw: number; tx: number; tz: number } | null>(null);
   const [vaneModal, setVaneModal] = useState<{ x1: number; z1: number; x2: number; z2: number } | null>(null);
+
+  // Edit modals
+  const [editPoleIdx, setEditPoleIdx] = useState<number | null>(null);
+  const [editCantileverIdx, setEditCantileverIdx] = useState<number | null>(null);
+  const [editVaneIdx, setEditVaneIdx] = useState<number | null>(null);
+
+  // Cantilever modal form state
+  const [cantFormLabel, setCantFormLabel] = useState('');
+  const [cantFormCWH, setCantFormCWH] = useState(5400);
+  const [cantFormSH, setCantFormSH] = useState(1000);
+  const [cantFormZZ, setCantFormZZ] = useState(250);
+  const [cantFormSO, setCantFormSO] = useState(1440);
+  const [cantFormCfg, setCantFormCfg] = useState('TDP>2.2');
+
+  // Vane modal form state
+  const [vaneFormLabel, setVaneFormLabel] = useState('');
+  const [vaneFormCwWeight, setVaneFormCwWeight] = useState(0.0019);
+  const [vaneFormCwTension, setVaneFormCwTension] = useState(1600);
+  const [vaneFormSwWeight, setVaneFormSwWeight] = useState(0.0024);
+  const [vaneFormSwTension, setVaneFormSwTension] = useState(2000);
+  const [vaneFormInitSep, setVaneFormInitSep] = useState(5000);
+  const [vaneFormDroppers, setVaneFormDroppers] = useState(0);
+  const [vaneFormDropWeight, setVaneFormDropWeight] = useState(0.0006);
+  const [vaneFormStepSize, setVaneFormStepSize] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
+  const stompRef = useRef<StompClient | null>(null);
+  const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable refs
   const completedTracksRef = useRef(completedTracks);
   useEffect(() => { completedTracksRef.current = completedTracks; }, [completedTracks]);
   const polesRef = useRef(poles);
   useEffect(() => { polesRef.current = poles; }, [poles]);
+  const cantileversRef = useRef(cantilevers);
+  useEffect(() => { cantileversRef.current = cantilevers; }, [cantilevers]);
+  const vanesRef = useRef(vanes);
+  useEffect(() => { vanesRef.current = vanes; }, [vanes]);
   const selFilterRef = useRef(selFilter);
   useEffect(() => { selFilterRef.current = selFilter; }, [selFilter]);
   const trackPointsRef = useRef(trackPoints);
@@ -153,8 +191,10 @@ export default function EditorPage() {
   useEffect(() => { selectedTracksRef.current = selectedTracks; }, [selectedTracks]);
   const selectedPolesRef = useRef(selectedPoles);
   useEffect(() => { selectedPolesRef.current = selectedPoles; }, [selectedPoles]);
-  const cantileversRef = useRef(cantilevers);
-  useEffect(() => { cantileversRef.current = cantilevers; }, [cantilevers]);
+  const selectedCantiRef = useRef(selectedCantilevers);
+  useEffect(() => { selectedCantiRef.current = selectedCantilevers; }, [selectedCantilevers]);
+  const selectedVanesRef = useRef(selectedVanes);
+  useEffect(() => { selectedVanesRef.current = selectedVanes; }, [selectedVanes]);
   const vanePointsRef = useRef(vanePoints);
   useEffect(() => { vanePointsRef.current = vanePoints; }, [vanePoints]);
 
@@ -173,35 +213,98 @@ export default function EditorPage() {
       setLocation(loc);
       const scene = parseSceneData(loc);
       if (scene) {
-        // Restore state from scene
         setCompletedTracks(scene.tracks.map(t => t.points.map(p => ({ ...p, label: t.label }))));
         setPoles(scene.poles);
         setCantilevers(scene.cantilevers);
         setVanes(scene.vanes);
       }
-    }).catch(() => {/* offline / no API — editor still works with empty scene */});
+    }).catch(() => {/* offline */ });
   }, [locationId]);
+
+  // WebSocket (STOMP) connection
+  useEffect(() => {
+    const client = new StompClient({
+      webSocketFactory: () => new WebSocket(`${import.meta.env.VITE_WS_URL ?? 'ws://localhost:8080'}/ws-raw`),
+      reconnectDelay: 5000,
+    });
+
+    client.onConnect = () => {
+      // Subscribe to cantilever calculation results
+      client.subscribe('/topic/calculation', msg => {
+        try {
+          const data: ApiResponse = JSON.parse(msg.body);
+          if (data.status === 'success') engineRef.current?.loadData(data);
+        } catch { /* ignore parse errors */ }
+      });
+      // Subscribe to vane calculation results
+      client.subscribe('/topic/vane-result', msg => {
+        try {
+          const data = JSON.parse(msg.body);
+          if (data.status === 'success' && data.vane) {
+            // Wrap vane response in ApiResponse structure for rendering
+            engineRef.current?.loadData({ status: 'success', calculation_time_ms: 0, poles: [{ lines: data.vane.lines || [], cantilevers: [] }] });
+          }
+        } catch { /* ignore */ }
+      });
+    };
+
+    client.activate();
+    stompRef.current = client;
+    return () => { client.deactivate(); stompRef.current = null; };
+  }, []);
 
   // Sync dynamic geometry to engine
   useEffect(() => {
     engineRef.current?.setDynamicGeometry({
       trackPoints, poles, completedTracks, selectedTracks, selectedPoles,
       cantileverPoints: [], cantilevers, vanes, vanePoints,
+      selectedCantilevers, selectedVanes,
     });
-  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vanePoints]);
+  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vanePoints, selectedCantilevers, selectedVanes]);
 
-  // Sync track mode
+  // Sync zigzag to engine for preview
+  useEffect(() => {
+    if (engineRef.current) engineRef.current.cantileverZigzag = cantFormZZ;
+  }, [cantFormZZ]);
+  useEffect(() => { if (engineRef.current) engineRef.current.cantileverZigzag = cantileverModal ? cantFormZZ : 250; }, [cantileverModal, cantFormZZ]);
+
+  // Sync track/snap modes
   useEffect(() => { if (engineRef.current) engineRef.current.trackMode = trackMode; }, [trackMode]);
   useEffect(() => { if (engineRef.current) engineRef.current.enableSnap = autoSnap; }, [autoSnap]);
+
+  // Trigger calculation when cantilevers change (debounced)
+  const triggerCalculation = useCallback((cantiList: CantileverData[]) => {
+    if (!stompRef.current?.connected) return;
+    if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current);
+    calcDebounceRef.current = setTimeout(() => {
+      cantiList.forEach(c => {
+        const dx = c.x2 - c.x1, dz = c.z2 - c.z1;
+        const payload = {
+          configuration: c.configuration ?? 'TDP>2.2',
+          polePosition: [c.x1, 0, c.z1],
+          pv: [dx, 0, dz],
+          contactWireHeight: c.contactWireHeight ?? 5400,
+          systemHeight: c.systemHeight ?? 1000,
+          zigzag: c.zigzag ?? 250,
+          supportOffset: c.supportOffset ?? 1440,
+          cantileversQuantity: 1,
+          catSeparation: 720,
+        };
+        stompRef.current?.publish({ destination: '/app/calculate/cantilever', body: JSON.stringify(payload) });
+      });
+    }, 400);
+  }, []);
+
+  useEffect(() => { triggerCalculation(cantilevers); }, [cantilevers, triggerCalculation]);
 
   // Save to API
   const saveScene = useCallback(async (
     tracks = completedTracksRef.current,
     poleList = polesRef.current,
     cantList = cantileversRef.current,
+    vaneList = vanesRef.current,
   ) => {
     if (!locationId || !location) return;
-    // Build SceneData from state
     const labelMap = new Map<string, { x: number; z: number; y?: number; r?: number; label?: string }[]>();
     tracks.forEach(tr => {
       const lbl = (tr[0] as any)?.label ?? '';
@@ -209,17 +312,10 @@ export default function EditorPage() {
       labelMap.get(lbl)!.push(...tr);
     });
     const trackData = Array.from(labelMap.entries()).map(([label, pts]) => ({
-      label,
-      points: pts.map(({ label: _l, ...rest }) => rest),
+      label, points: pts.map(({ label: _l, ...rest }) => rest),
     }));
-    const scene: SceneData = {
-      tracks: trackData,
-      poles: poleList,
-      cantilevers: cantList,
-      vanes,
-    };
-    setSaving(true);
-    setSaveError(null);
+    const scene: SceneData = { tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList };
+    setSaving(true); setSaveError(null);
     try {
       await api.locations.update(locationId, location.name, scene);
     } catch (e: any) {
@@ -227,7 +323,7 @@ export default function EditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [locationId, location, vanes]);
+  }, [locationId, location]);
 
   // viewer-click handler
   useEffect(() => {
@@ -251,11 +347,7 @@ export default function EditorPage() {
           }
           if (matchedLabel) {
             const finalTrack = newPoints.map(t => ({ ...t, label: matchedLabel }));
-            setCompletedTracks(prev => {
-              const next = [...prev, finalTrack];
-              saveScene(next);
-              return next;
-            });
+            setCompletedTracks(prev => { const next = [...prev, finalTrack]; saveScene(next); return next; });
             setTrackPoints([]);
           } else {
             setTrackModal(newPoints);
@@ -270,7 +362,8 @@ export default function EditorPage() {
 
       } else if (mode === 'cantilever') {
         const foot = closestPointOnTracks(completedTracksRef.current, x, z);
-        setCantileverModal({ x1: x, z1: z, x2: foot.x, z2: foot.z });
+        setCantileverModal({ x1: x, z1: z, x2raw: foot.x, z2raw: foot.z, tx: foot.tx, tz: foot.tz });
+        setCantFormLabel('');
 
       } else if (mode === 'vane') {
         const pts = vanePointsRef.current;
@@ -279,6 +372,7 @@ export default function EditorPage() {
         } else {
           setVaneModal({ x1: pts[0].x, z1: pts[0].z, x2: x, z2: z });
           setVanePoints([]);
+          setVaneFormLabel('');
         }
       }
     };
@@ -287,6 +381,8 @@ export default function EditorPage() {
       const { minX, maxX, minZ, maxZ } = (e as CustomEvent).detail;
       const selT = new Set<number>();
       const selP = new Set<number>();
+      const selC = new Set<number>();
+      const selV = new Set<number>();
       const inB = (x: number, z: number) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
       const matchedLabels = new Set<string>();
 
@@ -303,8 +399,20 @@ export default function EditorPage() {
           if (inB(p.x, p.z)) { selP.add(i); if (p.label) matchedLabels.add(p.label); }
         });
       }
+      if (selFilterRef.current.cantilevers) {
+        cantileversRef.current.forEach((c, i) => {
+          if (inB(c.x1, c.z1) || inB(c.x2, c.z2)) selC.add(i);
+        });
+      }
+      if (selFilterRef.current.vanes) {
+        vanesRef.current.forEach((v, i) => {
+          if (inB(v.x1, v.z1) || inB(v.x2, v.z2)) selV.add(i);
+        });
+      }
       setSelectedTracks(Array.from(selT));
       setSelectedPoles(Array.from(selP));
+      setSelectedCantilevers(Array.from(selC));
+      setSelectedVanes(Array.from(selV));
     };
 
     const container = containerRef.current;
@@ -321,22 +429,23 @@ export default function EditorPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === 'INPUT') return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'SELECT') return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const selT = selectedTracksRef.current;
         const selP = selectedPolesRef.current;
-        if (selT.length || selP.length) {
+        const selC = selectedCantiRef.current;
+        const selV = selectedVanesRef.current;
+        if (selT.length || selP.length || selC.length || selV.length) {
           setCompletedTracks(prev => prev.filter((_, i) => !selT.includes(i)));
           setPoles(prev => prev.filter((_, i) => !selP.includes(i)));
-          setSelectedTracks([]);
-          setSelectedPoles([]);
+          setCantilevers(prev => prev.filter((_, i) => !selC.includes(i)));
+          setVanes(prev => prev.filter((_, i) => !selV.includes(i)));
+          setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
         }
       } else if (e.key === 'Escape') {
-        setTrackPoints([]);
-        setVanePoints([]);
+        setTrackPoints([]); setVanePoints([]);
         if (drawMode !== 'none') { setDrawMode('none'); engineRef.current?.setDrawMode('none'); }
-        setSelectedTracks([]);
-        setSelectedPoles([]);
+        setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -359,16 +468,129 @@ export default function EditorPage() {
     engineRef.current?.setDrawMode(next);
   };
 
+  const saveCantilever = () => {
+    if (!cantileverModal) return;
+    if (!cantFormLabel.trim()) { alert('Label is required'); return; }
+    const zz = cantFormZZ;
+    const x2 = cantileverModal.x2raw + cantileverModal.tx * zz;
+    const z2 = cantileverModal.z2raw + cantileverModal.tz * zz;
+    const newC: CantileverData = {
+      x1: cantileverModal.x1, z1: cantileverModal.z1, x2, z2,
+      label: cantFormLabel.trim(),
+      contactWireHeight: cantFormCWH, systemHeight: cantFormSH,
+      zigzag: zz, supportOffset: cantFormSO, configuration: cantFormCfg,
+    };
+    setCantilevers(prev => {
+      const next = [...prev, newC];
+      saveScene(completedTracksRef.current, polesRef.current, next, vanesRef.current);
+      return next;
+    });
+    setCantileverModal(null);
+  };
+
+  const saveVane = () => {
+    if (!vaneModal) return;
+    if (!vaneFormLabel.trim()) { alert('Label is required'); return; }
+    const newV: VaneData = {
+      ...vaneModal, label: vaneFormLabel.trim(),
+      cwWeight: vaneFormCwWeight, cwTension: vaneFormCwTension,
+      swWeight: vaneFormSwWeight, swTension: vaneFormSwTension,
+      initialSeparation: vaneFormInitSep, qtyDroppers: vaneFormDroppers,
+      dropperWeight: vaneFormDropWeight, stepSize: vaneFormStepSize,
+    };
+    setVanes(prev => [...prev, newV]);
+    setVaneModal(null);
+  };
+
+  const openEditCantilever = (idx: number) => {
+    const c = cantilevers[idx];
+    if (!c) return;
+    setCantFormLabel(c.label ?? '');
+    setCantFormCWH(c.contactWireHeight ?? 5400);
+    setCantFormSH(c.systemHeight ?? 1000);
+    setCantFormZZ(c.zigzag ?? 250);
+    setCantFormSO(c.supportOffset ?? 1440);
+    setCantFormCfg(c.configuration ?? 'TDP>2.2');
+    setEditCantileverIdx(idx);
+  };
+
+  const saveEditCantilever = () => {
+    if (editCantileverIdx === null) return;
+    if (!cantFormLabel.trim()) { alert('Label is required'); return; }
+    setCantilevers(prev => {
+      const next = [...prev];
+      const old = next[editCantileverIdx];
+      // Recompute x2/z2 from original raw foot. Since we don't store raw foot,
+      // reverse the old zigzag to get approximate raw foot, then apply new zigzag.
+      // For simplicity, compute based on the existing direction.
+      const dx = old.x2 - old.x1, dz = old.z2 - old.z1;
+      const oldZz = old.zigzag ?? 250;
+      const len = Math.hypot(dx, dz);
+      let x2 = old.x2, z2 = old.z2;
+      if (len > 0) {
+        // Approximate: remove old zigzag, apply new
+        const tLen = len; // The vector already has zigzag baked in, approximate by using direction
+        const segDirX = dx / tLen, segDirZ = dz / tLen;
+        // Raw foot ≈ zigzag-adjusted foot minus old zigzag
+        const rawX = old.x2 - segDirX * oldZz;
+        const rawZ = old.z2 - segDirZ * oldZz;
+        x2 = rawX + segDirX * cantFormZZ;
+        z2 = rawZ + segDirZ * cantFormZZ;
+      }
+      next[editCantileverIdx] = {
+        ...old, label: cantFormLabel.trim(), x2, z2,
+        contactWireHeight: cantFormCWH, systemHeight: cantFormSH,
+        zigzag: cantFormZZ, supportOffset: cantFormSO, configuration: cantFormCfg,
+      };
+      saveScene(completedTracksRef.current, polesRef.current, next, vanesRef.current);
+      return next;
+    });
+    setEditCantileverIdx(null);
+    setSelectedCantilevers([]);
+  };
+
+  const openEditVane = (idx: number) => {
+    const v = vanes[idx];
+    if (!v) return;
+    setVaneFormLabel(v.label ?? '');
+    setVaneFormCwWeight(v.cwWeight ?? 0.0019);
+    setVaneFormCwTension(v.cwTension ?? 1600);
+    setVaneFormSwWeight(v.swWeight ?? 0.0024);
+    setVaneFormSwTension(v.swTension ?? 2000);
+    setVaneFormInitSep(v.initialSeparation ?? 5000);
+    setVaneFormDroppers(v.qtyDroppers ?? 0);
+    setVaneFormDropWeight(v.dropperWeight ?? 0.0006);
+    setVaneFormStepSize(v.stepSize ?? 0);
+    setEditVaneIdx(idx);
+  };
+
+  const saveEditVane = () => {
+    if (editVaneIdx === null) return;
+    if (!vaneFormLabel.trim()) { alert('Label is required'); return; }
+    setVanes(prev => {
+      const next = [...prev];
+      next[editVaneIdx] = {
+        ...next[editVaneIdx], label: vaneFormLabel.trim(),
+        cwWeight: vaneFormCwWeight, cwTension: vaneFormCwTension,
+        swWeight: vaneFormSwWeight, swTension: vaneFormSwTension,
+        initialSeparation: vaneFormInitSep, qtyDroppers: vaneFormDroppers,
+        dropperWeight: vaneFormDropWeight, stepSize: vaneFormStepSize,
+      };
+      return next;
+    });
+    setEditVaneIdx(null);
+    setSelectedVanes([]);
+  };
+
+  const totalSelected = selectedTracks.length + selectedPoles.length + selectedCantilevers.length + selectedVanes.length;
+
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div className="ocs-app">
       <nav className="ocs-nav">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button
-            onClick={() => navigate(-1)}
-            style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}
-          >
+          <button onClick={() => navigate(-1)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
             <ArrowLeft size={16} />
           </button>
           <div className="ocs-nav__brand">
@@ -376,22 +598,14 @@ export default function EditorPage() {
             {location?.name ?? 'Editor'} — OCS Designer
           </div>
         </div>
-
         <div className="ocs-nav__actions">
           {saveError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{saveError}</span>}
           {locationId && (
-            <button
-              onClick={() => saveScene()}
-              disabled={saving}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: saving ? '#1e293b' : '#3b82f6', border: '1px solid #3b82f6', color: '#fff', borderRadius: 6, cursor: saving ? 'default' : 'pointer', fontSize: '0.8rem', fontWeight: 500 }}
-            >
+            <button onClick={() => saveScene()} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: saving ? '#1e293b' : '#3b82f6', border: '1px solid #3b82f6', color: '#fff', borderRadius: 6, cursor: saving ? 'default' : 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
               <Save size={14} /> {saving ? 'Saving…' : 'Save'}
             </button>
           )}
-          <button
-            className={`view-toggle ${viewMode === '3D' ? 'view-toggle--3d' : ''}`}
-            onClick={toggleView}
-          >
+          <button className={`view-toggle ${viewMode === '3D' ? 'view-toggle--3d' : ''}`} onClick={toggleView}>
             {viewMode === '2D' ? <><Box size={15} /><span>3D</span></> : <><Square size={15} /><span>2D</span></>}
           </button>
         </div>
@@ -400,12 +614,28 @@ export default function EditorPage() {
       <div className="ocs-body">
         <aside className="ocs-toolbar">
           <div className="tool-group">
-            <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
               <ToolButton icon={<MousePointer2 size={17} />} label="Select" active={drawMode === 'none'} onClick={() => selectDraw('none')} />
               {drawMode === 'none' && viewMode === '2D' && (
                 <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '8px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, animation: 'fadeInDown 0.2s ease-out', fontSize: 11 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Tracks</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Poles</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.cantilevers} onChange={e => setSelFilter(f => ({ ...f, cantilevers: e.target.checked }))} style={{ accentColor: '#f59e0b', cursor: 'pointer' }} /> Cantilevers</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.vanes} onChange={e => setSelFilter(f => ({ ...f, vanes: e.target.checked }))} style={{ accentColor: '#eab308', cursor: 'pointer' }} /> Vanes</label>
+                  {totalSelected > 0 && (
+                    <div style={{ marginTop: 4, paddingTop: 6, borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ color: '#94a3b8', fontSize: 10 }}>{totalSelected} selected</span>
+                      {selectedCantilevers.length === 1 && (
+                        <button onClick={() => openEditCantilever(selectedCantilevers[0])} style={{ padding: '3px 8px', background: '#f59e0b', border: 'none', color: '#000', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Cantilever</button>
+                      )}
+                      {selectedVanes.length === 1 && (
+                        <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '3px 8px', background: '#eab308', border: 'none', color: '#000', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Vane</button>
+                      )}
+                      {selectedPoles.length === 1 && (
+                        <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '3px 8px', background: '#ef4444', border: 'none', color: '#fff', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Pole</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -414,12 +644,11 @@ export default function EditorPage() {
           <div className="tool-sep" />
 
           <div className="tool-group">
-            <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
               <ToolButton
                 icon={<Minus size={17} />}
                 label={drawMode === 'track' ? (trackMode === 'rect' ? 'Rect Track' : 'Poly Track') : 'Track'}
-                active={drawMode === 'track'}
-                disabled={viewMode === '3D'}
+                active={drawMode === 'track'} disabled={viewMode === '3D'}
                 onClick={() => selectDraw('track')}
               />
               {drawMode === 'track' && viewMode === '2D' && (
@@ -451,13 +680,11 @@ export default function EditorPage() {
 
         <main className="ocs-canvas-wrap">
           <div ref={containerRef} className="ocs-canvas" />
-
           <div className="canvas-badge">
             {viewMode === '2D'
               ? <><span className="canvas-badge__mode">2D</span><span className="canvas-badge__hint">Scroll: zoom · Right-drag: pan{drawMode !== 'none' && ` · Drawing: ${drawMode}`}</span></>
               : <><span className="canvas-badge__mode canvas-badge__mode--3d">3D</span><span className="canvas-badge__hint">Left-drag: orbit · Right-drag: pan · Scroll: zoom</span></>}
           </div>
-
           <div style={{ position: 'absolute', bottom: 20, right: 20, background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(51,65,85,0.5)', color: '#94a3b8', padding: '10px 14px', borderRadius: 6, zIndex: 50, fontFamily: 'monospace', fontSize: 13, userSelect: 'none' }}>
             <div style={{ paddingBottom: 6, borderBottom: '1px solid rgba(51,65,85,0.5)', marginBottom: 6, fontWeight: 600 }}>Axis View</div>
             <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: '#ef4444' }}>X</strong> Right (Pan)</div>
@@ -474,95 +701,250 @@ export default function EditorPage() {
         {/* ── Modals ── */}
 
         {poleModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
-              <h3 style={{ marginTop: 0 }}>Configure Pole</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Name / Label <span style={{ color: '#ef4444' }}>*</span></label>
-              <input id="pole-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
-              <label style={{ display: 'block', marginTop: 12 }}>Height (mm)</label>
-              <input id="pole-height-input" type="number" defaultValue="3000" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} />
-              <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-                <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setPoleModal(null)}>Cancel</button>
-                <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
-                  const lbl = (document.getElementById('pole-label-input') as HTMLInputElement).value.trim();
-                  if (!lbl) { alert('Label is required'); return; }
-                  const hgt = parseFloat((document.getElementById('pole-height-input') as HTMLInputElement).value) || 3000;
-                  setPoles(prev => {
-                    const next = [...prev, { ...poleModal!, label: lbl, h: hgt }];
-                    saveScene(completedTracksRef.current, next);
-                    return next;
-                  });
-                  setPoleModal(null);
-                }}>Save</button>
-              </div>
+          <Modal title="Configure Pole" onClose={() => setPoleModal(null)}>
+            <label style={LBL}>Name / Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <input id="pole-label-input" style={INP} autoFocus />
+            <label style={LBL}>Height (mm)</label>
+            <input id="pole-height-input" type="number" defaultValue="3000" style={INP} />
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setPoleModal(null)}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
+                const lbl = (document.getElementById('pole-label-input') as HTMLInputElement).value.trim();
+                if (!lbl) { alert('Label is required'); return; }
+                const hgt = parseFloat((document.getElementById('pole-height-input') as HTMLInputElement).value) || 3000;
+                setPoles(prev => { const next = [...prev, { ...poleModal!, label: lbl, h: hgt }]; saveScene(completedTracksRef.current, next); return next; });
+                setPoleModal(null);
+              }}>Save</button>
             </div>
-          </div>
+          </Modal>
         )}
 
         {trackModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
-              <h3 style={{ marginTop: 0 }}>Configure Track</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: '#ef4444' }}>*</span></label>
-              <input id="track-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
-              <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-                <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setTrackModal(null)}>Cancel</button>
-                <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
-                  const lbl = (document.getElementById('track-label-input') as HTMLInputElement).value.trim();
-                  if (!lbl) { alert('Label is required'); return; }
-                  const finalTrack = trackModal!.map(t => ({ ...t, label: lbl }));
-                  setCompletedTracks(prev => {
-                    const next = [...prev, finalTrack];
-                    saveScene(next);
-                    return next;
-                  });
-                  setTrackModal(null);
-                }}>Save</button>
-              </div>
+          <Modal title="Configure Track" onClose={() => setTrackModal(null)}>
+            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <input id="track-label-input" style={INP} autoFocus />
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setTrackModal(null)}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
+                const lbl = (document.getElementById('track-label-input') as HTMLInputElement).value.trim();
+                if (!lbl) { alert('Label is required'); return; }
+                const finalTrack = trackModal!.map(t => ({ ...t, label: lbl }));
+                setCompletedTracks(prev => { const next = [...prev, finalTrack]; saveScene(next); return next; });
+                setTrackModal(null);
+              }}>Save</button>
             </div>
-          </div>
+          </Modal>
         )}
 
         {cantileverModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
-              <h3 style={{ marginTop: 0 }}>Configure Cantilever</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: '#ef4444' }}>*</span></label>
-              <input id="cantilever-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
-              <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-                <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setCantileverModal(null)}>Cancel</button>
-                <button style={{ padding: '6px 16px', background: '#f59e0b', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
-                  const lbl = (document.getElementById('cantilever-label-input') as HTMLInputElement).value.trim();
-                  if (!lbl) { alert('Label is required'); return; }
-                  setCantilevers(prev => {
-                    const next = [...prev, { ...cantileverModal!, label: lbl }];
-                    saveScene(completedTracksRef.current, polesRef.current, next);
-                    return next;
-                  });
-                  setCantileverModal(null);
-                }}>Save</button>
+          <Modal title="Configure Cantilever" onClose={() => setCantileverModal(null)}>
+            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <input value={cantFormLabel} onChange={e => setCantFormLabel(e.target.value)} style={INP} autoFocus />
+
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Contact Wire Height (mm)</label>
+                <input type="number" value={cantFormCWH} onChange={e => setCantFormCWH(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>System Height (mm)</label>
+                <input type="number" value={cantFormSH} onChange={e => setCantFormSH(+e.target.value)} style={INP} />
               </div>
             </div>
-          </div>
+
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Zigzag (mm)</label>
+                <input type="number" value={cantFormZZ} onChange={e => setCantFormZZ(+e.target.value)} style={INP} />
+                <span style={{ fontSize: 10, color: '#64748b' }}>+forward / −backward along track</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Support Offset (mm)</label>
+                <input type="number" value={cantFormSO} onChange={e => setCantFormSO(+e.target.value)} style={INP} />
+              </div>
+            </div>
+
+            <label style={LBL}>Configuration</label>
+            <select value={cantFormCfg} onChange={e => setCantFormCfg(e.target.value)} style={{ ...INP, cursor: 'pointer' }}>
+              <option value="TDP>2.2">TDP &gt; 2.2</option>
+              <option value="TDP<2.2">TDP &lt; 2.2</option>
+              <option value="CAI">CAI</option>
+              <option value="SBA">SBA</option>
+            </select>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setCantileverModal(null)}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#f59e0b', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={saveCantilever}>Save</button>
+            </div>
+          </Modal>
         )}
 
         {vaneModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
-              <h3 style={{ marginTop: 0 }}>Configure Vane</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: '#ef4444' }}>*</span></label>
-              <input id="vane-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
-              <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-                <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setVaneModal(null)}>Cancel</button>
-                <button style={{ padding: '6px 16px', background: '#eab308', border: 'none', color: '#111', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={() => {
-                  const lbl = (document.getElementById('vane-label-input') as HTMLInputElement).value.trim();
-                  if (!lbl) { alert('Label is required'); return; }
-                  setVanes(prev => [...prev, { ...vaneModal!, label: lbl }]);
-                  setVaneModal(null);
-                }}>Save</button>
+          <Modal title="Configure Vane" onClose={() => setVaneModal(null)}>
+            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <input value={vaneFormLabel} onChange={e => setVaneFormLabel(e.target.value)} style={INP} autoFocus />
+
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>CW Weight (kg/m)</label>
+                <input type="number" step="0.0001" value={vaneFormCwWeight} onChange={e => setVaneFormCwWeight(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>CW Tension (N)</label>
+                <input type="number" value={vaneFormCwTension} onChange={e => setVaneFormCwTension(+e.target.value)} style={INP} />
               </div>
             </div>
-          </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>SW Weight (kg/m)</label>
+                <input type="number" step="0.0001" value={vaneFormSwWeight} onChange={e => setVaneFormSwWeight(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>SW Tension (N)</label>
+                <input type="number" value={vaneFormSwTension} onChange={e => setVaneFormSwTension(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Initial Separation (mm)</label>
+                <input type="number" value={vaneFormInitSep} onChange={e => setVaneFormInitSep(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Qty Droppers</label>
+                <input type="number" value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Dropper Weight (kg)</label>
+                <input type="number" step="0.0001" value={vaneFormDropWeight} onChange={e => setVaneFormDropWeight(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Step Size</label>
+                <input type="number" value={vaneFormStepSize} onChange={e => setVaneFormStepSize(+e.target.value)} style={INP} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setVaneModal(null)}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#eab308', border: 'none', color: '#111', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveVane}>Save</button>
+            </div>
+          </Modal>
+        )}
+
+        {/* ── Edit: Pole ── */}
+        {editPoleIdx !== null && (() => {
+          const p = poles[editPoleIdx];
+          if (!p) return null;
+          return (
+            <Modal title={`Edit Pole: ${p.label ?? ''}`} onClose={() => setEditPoleIdx(null)}>
+              <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+              <input id="ep-label" defaultValue={p.label ?? ''} style={INP} autoFocus />
+              <label style={LBL}>Height (mm)</label>
+              <input id="ep-height" type="number" defaultValue={p.h ?? 3000} style={INP} />
+              <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+                <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setEditPoleIdx(null)}>Cancel</button>
+                <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
+                  const lbl = (document.getElementById('ep-label') as HTMLInputElement).value.trim();
+                  if (!lbl) { alert('Label is required'); return; }
+                  const hgt = parseFloat((document.getElementById('ep-height') as HTMLInputElement).value) || 3000;
+                  setPoles(prev => { const n = [...prev]; n[editPoleIdx!] = { ...p, label: lbl, h: hgt }; saveScene(completedTracksRef.current, n); return n; });
+                  setEditPoleIdx(null); setSelectedPoles([]);
+                }}>Save</button>
+              </div>
+            </Modal>
+          );
+        })()}
+
+        {/* ── Edit: Cantilever ── */}
+        {editCantileverIdx !== null && (
+          <Modal title={`Edit Cantilever: ${cantFormLabel}`} onClose={() => setEditCantileverIdx(null)}>
+            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <input value={cantFormLabel} onChange={e => setCantFormLabel(e.target.value)} style={INP} autoFocus />
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Contact Wire Height (mm)</label>
+                <input type="number" value={cantFormCWH} onChange={e => setCantFormCWH(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>System Height (mm)</label>
+                <input type="number" value={cantFormSH} onChange={e => setCantFormSH(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Zigzag (mm)</label>
+                <input type="number" value={cantFormZZ} onChange={e => setCantFormZZ(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Support Offset (mm)</label>
+                <input type="number" value={cantFormSO} onChange={e => setCantFormSO(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <label style={LBL}>Configuration</label>
+            <select value={cantFormCfg} onChange={e => setCantFormCfg(e.target.value)} style={{ ...INP, cursor: 'pointer' }}>
+              <option value="TDP>2.2">TDP &gt; 2.2</option>
+              <option value="TDP<2.2">TDP &lt; 2.2</option>
+              <option value="CAI">CAI</option>
+              <option value="SBA">SBA</option>
+            </select>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setEditCantileverIdx(null)}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#f59e0b', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={saveEditCantilever}>Save</button>
+            </div>
+          </Modal>
+        )}
+
+        {/* ── Edit: Vane ── */}
+        {editVaneIdx !== null && (
+          <Modal title={`Edit Vane: ${vaneFormLabel}`} onClose={() => setEditVaneIdx(null)}>
+            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <input value={vaneFormLabel} onChange={e => setVaneFormLabel(e.target.value)} style={INP} autoFocus />
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>CW Weight (kg/m)</label>
+                <input type="number" step="0.0001" value={vaneFormCwWeight} onChange={e => setVaneFormCwWeight(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>CW Tension (N)</label>
+                <input type="number" value={vaneFormCwTension} onChange={e => setVaneFormCwTension(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>SW Weight (kg/m)</label>
+                <input type="number" step="0.0001" value={vaneFormSwWeight} onChange={e => setVaneFormSwWeight(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>SW Tension (N)</label>
+                <input type="number" value={vaneFormSwTension} onChange={e => setVaneFormSwTension(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Initial Separation (mm)</label>
+                <input type="number" value={vaneFormInitSep} onChange={e => setVaneFormInitSep(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Qty Droppers</label>
+                <input type="number" value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={ROW}>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Dropper Weight (kg)</label>
+                <input type="number" step="0.0001" value={vaneFormDropWeight} onChange={e => setVaneFormDropWeight(+e.target.value)} style={INP} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={LBL}>Step Size</label>
+                <input type="number" value={vaneFormStepSize} onChange={e => setVaneFormStepSize(+e.target.value)} style={INP} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setEditVaneIdx(null)}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#eab308', border: 'none', color: '#111', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveEditVane}>Save</button>
+            </div>
+          </Modal>
         )}
       </div>
     </div>

@@ -1,0 +1,10 @@
+{
+  "name": "ocs",
+  "private": true,
+  "description": "OCS monorepo manager",
+  "scripts": {
+    "setup": "node manage.js install",
+    "build": "node manage.js build",
+    "dev":   "node manage.js dev"
+  }
+}

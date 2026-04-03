@@ -1,21 +1,25 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
 
 /* ─── Design tokens ─────────────────────────────────────────────────────── */
 :root {
-  --bg:          #0a0e1a;
-  --surface:     #111827;
-  --surface2:    #1c2539;
-  --border:      #1e2d45;
-  --accent:      #3b82f6;
-  --accent-glow: rgba(59,130,246,0.18);
-  --text:        #e2e8f0;
-  --muted:       #64748b;
-  --success:     #22c55e;
-  --danger:      #ef4444;
-  --font:        'Inter', system-ui, sans-serif;
+  --bg: #0a0e1a;
+  --surface: #111827;
+  --surface2: #1c2539;
+  --border: #1e2d45;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.18);
+  --text: #e2e8f0;
+  --muted: #64748b;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --font: 'Inter', system-ui, sans-serif;
 }
 
 body {
@@ -26,7 +30,9 @@ body {
   overflow: hidden;
 }
 
-#root { height: 100vh; }
+#root {
+  height: 100vh;
+}
 
 /* ─── App shell ──────────────────────────────────────────────────────────── */
 .ocs-app {
@@ -88,8 +94,17 @@ body {
   cursor: pointer;
   transition: all 0.18s;
 }
-.view-toggle:hover { border-color: var(--accent); color: var(--accent); }
-.view-toggle--3d   { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+
+.view-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.view-toggle--3d {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
 
 /* ─── Body ───────────────────────────────────────────────────────────────── */
 .ocs-body {
@@ -148,23 +163,32 @@ body {
   transition: all 0.15s;
   white-space: nowrap;
 }
+
 .tool-btn:hover:not(.tool-btn--disabled) {
   background: var(--surface2);
   border-color: var(--border);
   color: var(--text);
 }
+
 .tool-btn--active {
   background: var(--accent-glow);
   border-color: var(--accent);
   color: var(--accent);
 }
+
 .tool-btn--disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 
-.tool-btn__icon { line-height: 1; }
-.tool-btn__label { line-height: 1; letter-spacing: 0.02em; }
+.tool-btn__icon {
+  line-height: 1;
+}
+
+.tool-btn__label {
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
 
 /* ─── Legend ─────────────────────────────────────────────────────────────── */
 .toolbar-legend {
@@ -261,7 +285,32 @@ body {
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */
-::-webkit-scrollbar         { width: 5px; }
-::-webkit-scrollbar-track   { background: transparent; }
-::-webkit-scrollbar-thumb   { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────────── */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

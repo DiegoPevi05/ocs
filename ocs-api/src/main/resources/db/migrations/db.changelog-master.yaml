@@ -1,3 +1,9 @@
 databaseChangeLog:
   - include:
       file: db/migrations/v0001_initial_schema.sql
+  - include:
+      file: db/migrations/v0002_scene_data.sql
+  - include:
+      file: db/migrations/v0003_missing_columns.sql
+  - include:
+      file: db/migrations/v0004_memberships_updated_at.sql

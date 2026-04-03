@@ -32,4 +32,7 @@ public class Location extends BaseEntity {
 
     @Column(columnDefinition = "jsonb")
     private String geoCoordinates;
+
+    @Column(name = "scene_data", columnDefinition = "jsonb")
+    private String sceneData;
 }

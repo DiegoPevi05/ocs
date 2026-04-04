@@ -7,3 +7,5 @@ databaseChangeLog:
       file: db/migrations/v0003_missing_columns.sql
   - include:
       file: db/migrations/v0004_memberships_updated_at.sql
+  - include:
+      file: db/migrations/v0005_cantilever_params.sql

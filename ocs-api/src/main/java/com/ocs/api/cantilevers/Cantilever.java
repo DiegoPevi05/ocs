@@ -30,10 +30,21 @@ public class Cantilever extends BaseEntity {
     @Column(nullable = false)
     private String configuration;
 
+    // ── Heights ──────────────────────────────────────────────────────────────
     private Double contactWireHeight;
     private Double systemHeight;
+    private Double contactWireVerticalOffset;
+
+    // ── Offsets & distances ───────────────────────────────────────────────────
     private Double zigzag;
     private Double supportOffset;
+    private Double fixingDistance;
+    private Double bottomFixedHeight;
+
+    // ── Track geometry at this pole installation ──────────────────────────────
+    // trackGauge is NOT duplicated here — resolved via pole.track.gaugeMm
+    private Double u;                       // superelevation (cant) in mm
+    private String curveRadiusDirection;    // "inside" | "outside"
 
     @Column(columnDefinition = "jsonb")
     private String calcResultJson;

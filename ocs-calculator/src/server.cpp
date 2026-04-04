@@ -68,7 +68,6 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     std::string configType = j.value("configuration", "TDP>2.2");
     components::ModelInterface model = { { getConfigType(configType), components::ContactWireConfiguration::SINGLE } };
     components::PoleModel poleModel = { { 300.0 } };
-    components::Track track = { 1435.0, { 50.0 } };
     
     math::Vec3 polePos = {0.0, 0.0, 0.0};
     if (j.contains("polePosition")) {
@@ -122,15 +121,26 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     double systemHeight = j.value("systemHeight", 1000.0);
     double zigzag = j.value("zigzag", 200.0);
     double contactWireVerticalOffset = j.value("contactWireVerticalOffset", 120.0);
+    double fixingDistance = j.value("fixingDistance", 1500.0);
+    double bottomFixedHeight = j.value("bottomFixedHeight", 800.0);
+    double u = j.value("u", 0.0);
+    double trackGauge = j.value("trackGauge", 1435.0);
+
+    std::string crvDir = j.value("curveRadiusDirection", "inside");
+    components::CurveRadiusDirection curveDir =
+        (crvDir == "outside") ? components::CurveRadiusDirection::OUTSIDE
+                               : components::CurveRadiusDirection::INSIDE;
+
+    components::Track track = { trackGauge, { 50.0 } };
 
     components::Pole poleOrchestrator(pole3D, 500.0, 150.0, 4500.0, supportOffset, catSeparation, pv);
 
     for (int i=0; i < numCantilevers; ++i) {
         auto builder = std::make_shared<CantileverBuilder>(
-            model, track, components::CurveRadiusDirection::INSIDE, pv, pole3D,
-            0.0, supportOffset, contactWireHeight, contactWireVerticalOffset, systemHeight,
+            model, track, curveDir, pv, pole3D,
+            u, supportOffset, contactWireHeight, contactWireVerticalOffset, systemHeight,
             (i % 2 == 0) ? zigzag : -zigzag,
-            1500.0, 800.0
+            fixingDistance, bottomFixedHeight
         );
         
         auto stayTube = std::make_shared<assemblies::StayTube>(stayTubeParams);
@@ -274,6 +284,42 @@ int main() {
     // Maintain backwards compatibility
     svr.Post("/calculate", handle_cantilever);
     svr.Post("/cantilever", handle_cantilever);
+
+    svr.Post("/batch", [&](const httplib::Request& req, httplib::Response& res) {
+        set_cors(res);
+        try {
+            auto jArray = json::parse(req.body);
+            json responseArray = json::array();
+            double totalTime = 0;
+            if (jArray.is_array()) {
+                for (const auto& j : jArray) {
+                    double calcTime = 0;
+                    json polesJson = buildCantileversLogic(j, calcTime);
+                    totalTime += calcTime;
+                    for (const auto& p : polesJson) {
+                        responseArray.push_back(p);
+                    }
+                }
+            } else {
+                double calcTime = 0;
+                json polesJson = buildCantileversLogic(jArray, calcTime);
+                totalTime += calcTime;
+                for (const auto& p : polesJson) {
+                    responseArray.push_back(p);
+                }
+            }
+            json response = {
+                {"status", "success"},
+                {"calculation_time_ms", totalTime},
+                {"poles", responseArray}
+            };
+            res.set_content(response.dump(), "application/json");
+        } catch (const std::exception& e) {
+            json err = {{"status", "error"}, {"message", e.what()}};
+            res.status = 400;
+            res.set_content(err.dump(), "application/json");
+        }
+    });
 
     svr.Post("/vane", [&](const httplib::Request& req, httplib::Response& res) {
         set_cors(res);

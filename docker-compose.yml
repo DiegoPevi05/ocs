@@ -6,6 +6,10 @@
 #   3. Per-service env_file (injected into the container)
 #   4. Defaults defined below with :- syntax
 #
+# Networks:
+#   backend  — postgres, ocs-calculator, ocs-api (internal services only)
+#   frontend — ocs-api, ocs-web (ocs-api bridges both networks)
+#
 # Setup:
 #   cp .env.example .env                  # edit root compose vars
 #   cp ocs-api/.env.example ocs-api/.env  # edit API vars
@@ -27,6 +31,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -42,6 +48,8 @@ services:
     restart: unless-stopped
     ports:
       - "${CALCULATOR_PORT:-8081}:8081"
+    networks:
+      - backend
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
       interval: 15s
@@ -61,6 +69,9 @@ services:
     # These override the local-dev defaults in application.yml.
     env_file:
       - ./ocs-api/.env
+    networks:
+      - backend
+      - frontend
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,8 +92,16 @@ services:
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-5173}:80"
+    networks:
+      - frontend
     depends_on:
       - ocs-api
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
 
 volumes:
   pgdata:

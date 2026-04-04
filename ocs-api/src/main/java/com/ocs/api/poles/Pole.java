@@ -35,4 +35,7 @@ public class Pole extends BaseEntity {
 
     @Column(nullable = false)
     private String poleType;
+
+    private Integer cantileversQuantity;
+    private Double catSeparation;
 }

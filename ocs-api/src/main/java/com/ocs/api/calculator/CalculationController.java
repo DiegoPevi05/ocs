@@ -42,6 +42,19 @@ public class CalculationController {
     }
 
     /**
+     * Receives batch array from frontend via STOMP (/app/calculate/batch),
+     * calls ocs-calculator, and broadcasts result to /topic/calculation.
+     */
+    @MessageMapping("/calculate/batch")
+    public void calculateBatch(@Payload com.fasterxml.jackson.databind.JsonNode request) {
+        calculatorClient.calculateBatch(request)
+                .subscribe(
+                        result -> messaging.convertAndSend("/topic/calculation", result),
+                        error -> messaging.convertAndSend("/topic/calculation", errorNode(error.getMessage()))
+                );
+    }
+
+    /**
      * Receives vane params from frontend via STOMP (/app/calculate/vane),
      * calls ocs-calculator, and broadcasts result to /topic/vane-result.
      */

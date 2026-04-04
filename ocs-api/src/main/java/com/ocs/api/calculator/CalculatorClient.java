@@ -23,6 +23,14 @@ public class CalculatorClient {
                 .bodyToMono(JsonNode.class);
     }
 
+    public Mono<JsonNode> calculateBatch(Object dto) {
+        return webClient.post()
+                .uri("/batch")
+                .bodyValue(dto)
+                .retrieve()
+                .bodyToMono(JsonNode.class);
+    }
+
     public Mono<JsonNode> calculateVane(Object dto) {
         return webClient.post()
                 .uri("/vane")

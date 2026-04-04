@@ -66,7 +66,7 @@ export class ViewerEngine {
   private selectStartY: number = 0;
 
   // Track current dynamic data for rubberband & snap context
-  private dynData: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] } = { trackPoints: [], poles: [] };
+  private dynData: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, x2raw?: number, z2raw?: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] } = { trackPoints: [], poles: [] };
   public trackMode: 'rect' | 'poly' = 'rect';
 
   // Pan state (2D)
@@ -465,8 +465,8 @@ export class ViewerEngine {
         const line = obj as THREE.Line;
         if (line.userData && line.userData.apiLine) {
           const al = line.userData.apiLine as ApiLine;
-          checkPt(al.start[0], al.start[2]);
-          checkPt(al.end[0], al.end[2]);
+          checkPt(al.start[0], -al.start[2]);
+          checkPt(al.end[0], -al.end[2]);
         }
       });
       // Snap to in-progress points
@@ -818,8 +818,7 @@ export class ViewerEngine {
 
   // ─── Data loading ─────────────────────────────────────────────────────────────
 
-  public loadData(data: ApiResponse): void {
-    // Dispose and clear existing geometry
+  public clearApiData(): void {
     this.dataGroup.traverse((obj) => {
       const o = obj as THREE.Line;
       if (o.geometry) o.geometry.dispose();
@@ -832,38 +831,43 @@ export class ViewerEngine {
     while (this.dataGroup.children.length) {
       this.dataGroup.remove(this.dataGroup.children[0]);
     }
+  }
 
-    // Build Three.js geometry from API data
+  public addApiData(data: ApiResponse): void {
+    const offset = this.dataGroup.children.length;
     data.poles.forEach((pole, pi) => {
       const poleGroup = new THREE.Group();
-      poleGroup.name = `pole_${pi} `;
-
+      poleGroup.name = `pole_${offset + pi}`;
       pole.lines.forEach((apiLine) => poleGroup.add(this.makeApiLine(apiLine)));
-
       pole.cantilevers.forEach((cat, ci) => {
         const catGroup = new THREE.Group();
-        catGroup.name = `cat_${pi}_${ci} `;
+        catGroup.name = `cat_${offset + pi}_${ci}`;
         cat.lines.forEach((apiLine) => catGroup.add(this.makeApiLine(apiLine)));
         poleGroup.add(catGroup);
       });
-
       this.dataGroup.add(poleGroup);
     });
-
-    this.fitCamera();
     this.updateGrid();
+  }
+
+  public loadData(data: ApiResponse): void {
+    this.clearApiData();
+    this.addApiData(data);
+    this.fitCamera();
   }
 
   private makeApiLine(apiLine: ApiLine): THREE.Line {
     const color = rgbaToHex(apiLine.color);
+    // Calculator Z axis is opposite to viewer Z axis — negate Z when mapping.
     const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(apiLine.start[0], apiLine.start[1], apiLine.start[2]),
-      new THREE.Vector3(apiLine.end[0], apiLine.end[1], apiLine.end[2]),
+      new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]),
+      new THREE.Vector3(apiLine.end[0], apiLine.end[1], -apiLine.end[2]),
     ]);
     const mat = new THREE.LineBasicMaterial({ color });
     const line = new THREE.Line(geo, mat);
     line.name = apiLine.name;
     line.userData.apiLine = apiLine;
+    line.layers.set(2);
     return line;
   }
 
@@ -946,9 +950,12 @@ export class ViewerEngine {
               const cx = mx - uz * h * sign, cz = mz + ux * h * sign;
               const sa = Math.atan2(prev.z - cz, prev.x - cx);
               const ea = Math.atan2(curr.z - cz, curr.x - cx);
+              let poleSweep = ea - sa;
+              if (curr.r > 0 && poleSweep < 0) poleSweep += 2 * Math.PI;
+              if (curr.r < 0 && poleSweep > 0) poleSweep -= 2 * Math.PI;
               const steps = 32;
               for (let s = 0; s <= steps; s++) {
-                const a = sa + (ea - sa) * s / steps;
+                const a = sa + poleSweep * s / steps;
                 const px = cx + R * Math.cos(a), pz = cz + R * Math.sin(a);
                 const dist = Math.hypot(wx - px, wz - pz);
                 if (dist < minDist) { minDist = dist; footX = px; footZ = pz; }
@@ -1035,8 +1042,11 @@ export class ViewerEngine {
               const cx = mx - uz * h * sign, cz = mz + ux * h * sign;
               const sa = Math.atan2(prev.z - cz, prev.x - cx);
               const ea = Math.atan2(curr.z - cz, curr.x - cx);
+              let arcSweep = ea - sa;
+              if (curr.r > 0 && arcSweep < 0) arcSweep += 2 * Math.PI;  // CCW: keep positive
+              if (curr.r < 0 && arcSweep > 0) arcSweep -= 2 * Math.PI;  // CW: keep negative
               for (let s = 0; s <= 32; s++) {
-                const a = sa + (ea - sa) * s / 32;
+                const a = sa + arcSweep * s / 32;
                 const qx = cx + R * Math.cos(a), qz = cz + R * Math.sin(a);
                 const dist = Math.hypot(wx - qx, wz - qz);
                 if (dist < minDist) {
@@ -1068,12 +1078,17 @@ export class ViewerEngine {
       }
 
       if (minDist < Infinity) {
-        // Apply zigzag offset along track direction
+        // Apply zigzag offset along the PV direction (pole to track foot)
         const zz = this.cantileverZigzag;
-        const zfX = footX + segDirX * zz;
-        const zfZ = footZ + segDirZ * zz;
+        const dx = footX - wx;
+        const dz = footZ - wz;
+        const len = Math.hypot(dx, dz);
+        let ux = 0, uz = 0;
+        if (len > 0) { ux = dx / len; uz = dz / len; }
+        const zfX = footX + ux * zz;
+        const zfZ = footZ + uz * zz;
 
-        // Dashed cantilever arm: pole → track foot (zigzag-adjusted)
+        // Dashed perpendicular arm: cursor/pole → zigzag-adjusted foot
         const geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(wx, 0, wz),
           new THREE.Vector3(zfX, 0, zfZ),
@@ -1083,29 +1098,19 @@ export class ViewerEngine {
         line.computeLineDistances();
         this.rubberbandGroup.add(line);
 
-        // Dot at track foot (zigzag position)
+        // Dot at final offset foot location
         const cgeo = new THREE.CircleGeometry(120, 16);
         cgeo.rotateX(-Math.PI / 2);
-        const cmat = new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide });
+        const cmat = new THREE.MeshBasicMaterial({ color: 0x16a34a, side: THREE.DoubleSide });
         const dot = new THREE.Mesh(cgeo, cmat);
         dot.position.set(zfX, 0, zfZ);
         dot.layers.set(1);
         this.rubberbandGroup.add(dot);
-
-        // Thin perpendicular line from raw foot to zigzag foot (shows offset)
-        if (Math.abs(zz) > 0.1) {
-          const pgeo = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(footX, 0, footZ),
-            new THREE.Vector3(zfX, 0, zfZ),
-          ]);
-          const pmat = new THREE.LineBasicMaterial({ color: 0x16a34a, transparent: true, opacity: 0.5 });
-          this.rubberbandGroup.add(new THREE.Line(pgeo, pmat));
-        }
       }
     }
   }
 
-  public setDynamicGeometry(data: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], selectedTracks?: number[], selectedPoles?: number[], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] }): void {
+  public setDynamicGeometry(data: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], selectedTracks?: number[], selectedPoles?: number[], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, x2raw?: number, z2raw?: number, zigzag?: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] }): void {
     this.dynData = data;
     // Clear dynamic group
     this.dynamicGroup.traverse((obj) => {
@@ -1211,20 +1216,39 @@ export class ViewerEngine {
       data.cantilevers.forEach((c, ci) => {
         const isSelected = data.selectedCantilevers?.includes(ci) ?? false;
         const color = isSelected ? 0xfbbf24 : 0xf59e0b;
+        const rawX = c.x2raw ?? c.x2;
+        const rawZ = c.z2raw ?? c.z2;
+
+        // Auto-correct legacy x2/z2 that were offset along track tangent
+        let finalX = c.x2;
+        let finalZ = c.z2;
+        const dx = rawX - c.x1;
+        const dz = rawZ - c.z1;
+        const len = Math.hypot(dx, dz);
+        if (len > 0) {
+          const zz = c.zigzag ?? 250;
+          finalX = rawX + (dx / len) * zz;
+          finalZ = rawZ + (dz / len) * zz;
+        }
+
+        // Perpendicular arm (structural)
         const geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(c.x1, 0, c.z1),
-          new THREE.Vector3(c.x2, 0, c.z2)
+          new THREE.Vector3(finalX, 0, finalZ)
         ]);
         const mat = new THREE.LineBasicMaterial({ color, linewidth: isSelected ? 3 : 2 });
-        this.dynamicGroup.add(new THREE.Line(geo, mat));
+        const line2d = new THREE.Line(geo, mat);
+        line2d.layers.set(1);
+        this.dynamicGroup.add(line2d);
         if (isSelected) {
           // Highlight dots at endpoints
-          [{ x: c.x1, z: c.z1 }, { x: c.x2, z: c.z2 }].forEach(pt => {
+          [{ x: c.x1, z: c.z1 }, { x: finalX, z: finalZ }].forEach(pt => {
             const cgeo = new THREE.CircleGeometry(120, 16);
             cgeo.rotateX(-Math.PI / 2);
             const cmat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide });
             const mesh = new THREE.Mesh(cgeo, cmat);
             mesh.position.set(pt.x, 1, pt.z);
+            mesh.layers.set(1);
             this.dynamicGroup.add(mesh);
           });
         }
@@ -1271,6 +1295,18 @@ export class ViewerEngine {
       this.labelsContainer.appendChild(div);
     };
 
+    const addRotatedLbl = (text: string, v: THREE.Vector3, rotateDeg: number) => {
+      const clone = v.clone();
+      clone.project(cam);
+      if (clone.z > 1 || clone.z < -1) return;
+      const x = (clone.x * .5 + .5) * this.container.offsetWidth;
+      const y = (clone.y * -.5 + .5) * this.container.offsetHeight;
+      const div = document.createElement('div');
+      div.textContent = text;
+      div.style.cssText = `position: absolute; left: ${x}px; top: ${y}px; transform: translate(-50%, -50%) rotate(${rotateDeg}deg); transform-origin: center; background: rgba(15,23,42,0.85); border: 1px solid rgba(245,158,11,0.5); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: monospace; white-space: nowrap; letter-spacing: -0.2px; font-weight: 600;`;
+      this.labelsContainer.appendChild(div);
+    };
+
     this.dynData.poles.forEach(p => {
       if (p.label) addLbl(`${p.label} (H: ${Math.round(p.h || 3000)})`, new THREE.Vector3(p.x + 400, (p.y || 0) + (p.h || 3000) + 200, p.z));
     });
@@ -1287,9 +1323,47 @@ export class ViewerEngine {
 
     if (this.dynData.cantilevers) {
       this.dynData.cantilevers.forEach(c => {
+        const rawX = c.x2raw ?? c.x2;
+        const rawZ = c.z2raw ?? c.z2;
+
+        // Recompute finalX/finalZ the same way the renderer does
+        const dx = rawX - c.x1;
+        const dz = rawZ - c.z1;
+        const len = Math.hypot(dx, dz);
+        let finalX = rawX, finalZ = rawZ;
+        if (len > 0) {
+          const zz = (c as any).zigzag ?? 250;
+          finalX = rawX + (dx / len) * zz;
+          finalZ = rawZ + (dz / len) * zz;
+        }
+
+        // Midpoint of the arm
+        const mx = (c.x1 + finalX) / 2;
+        const mz = (c.z1 + finalZ) / 2;
+
+        // Perpendicular offset (rotate arm 90°): (-dz, dx) normalised × 400
+        const perpOffset = 400;
+        let px = 0, pz = 0;
+        if (len > 0) {
+          px = (-dz / len) * perpOffset;
+          pz = (dx / len) * perpOffset;
+        }
+
+        // Cantilever name label — offset to one side perpendicular to arm
         if (c.label) {
-          const mx = (c.x1 + c.x2) / 2, mz = (c.z1 + c.z2) / 2;
-          addLbl(c.label, new THREE.Vector3(mx, 100, mz));
+          addLbl(c.label, new THREE.Vector3(mx + px, 100, mz + pz));
+        }
+
+        // Zigzag distance label — at the end of the arm, rotated to read along the arm
+        if (this.viewMode === '2D') {
+          const zz = (c as any).zigzag ?? 250;
+          // Angle: world XZ → screen. Top-down camera: X→right, Z→up on screen.
+          // atan2 of (dz, dx) gives the arm angle; negate dz because Z is inverted on screen.
+          const angleDeg = Math.atan2(-dz, dx) * (180 / Math.PI);
+          const labelOffset = 400;
+          const lblX = len > 0 ? finalX + (dx / len) * labelOffset : finalX;
+          const lblZ = len > 0 ? finalZ + (dz / len) * labelOffset : finalZ;
+          addRotatedLbl(`${Math.round(zz)} mm`, new THREE.Vector3(lblX, 100, lblZ), angleDeg);
         }
       });
     }

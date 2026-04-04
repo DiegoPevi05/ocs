@@ -43,17 +43,30 @@ export type DrawMode = 'none' | 'track' | 'pole' | 'cantilever' | 'vane';
 
 export interface TrackPoint { x: number; z: number; y?: number; r?: number; }
 export interface TrackData { id?: string; label: string; points: TrackPoint[]; }
-export interface PoleData { id?: string; label?: string; x: number; z: number; y?: number; h?: number; }
+export interface PoleData { id?: string; label?: string; x: number; z: number; y?: number; h?: number;
+  cantileversQuantity?: number;  // how many catenary wires on this pole, default 1
+  catSeparation?: number;        // vertical separation between catenary wires mm, default 720
+}
 export interface CantileverData {
   id?: string; label?: string;
   x1: number; z1: number;   // pole position
   x2: number; z2: number;   // track foot (zigzag-adjusted)
-  // Calculation params
-  contactWireHeight?: number;  // mm, default 5400
-  systemHeight?: number;       // mm, default 1000
-  zigzag?: number;             // mm, default 250 (positive = forward along track)
-  supportOffset?: number;      // mm, default 1440
-  configuration?: string;      // "TDP>2.2" | "TDP<2.2" | "CAI" | "SBA"
+  x2raw?: number;  // perpendicular foot on track (no zigzag), needed for correct pv
+  z2raw?: number;
+  tx?: number;     // track tangent X at foot (unit vector)
+  tz?: number;     // track tangent Z at foot (unit vector)
+  // Calculation params — main_params
+  contactWireHeight?: number;          // mm, default 5400
+  systemHeight?: number;               // mm, default 1000
+  contactWireVerticalOffset?: number;  // mm, default 120
+  zigzag?: number;                     // mm, default 250
+  supportOffset?: number;              // mm, default 1440
+  fixingDistance?: number;             // mm, default 1500
+  bottomFixedHeight?: number;          // mm, default 800
+  u?: number;                          // track superelevation mm, default 0
+  curveRadiusDirection?: string;       // 'inside' | 'outside', default 'inside'
+  trackGauge?: number;                 // mm, default 1435
+  configuration?: string;              // "TDP>2.2" | "TDP<2.2" | "CAI" | "SBA"
 }
 export interface VaneData {
   id?: string; label?: string;

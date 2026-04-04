@@ -91,8 +91,26 @@ std::vector<TubeDimension> RegisterArm::generateResults(const CantileverFrame& f
 
 std::vector<viewer::Line3D> RegisterArm::getRenderLines() const {
     if (endPoint.x == 0 && endPoint.y == 0 && endPoint.z == 0) return {};
-    // Purple for register arm
-    return { viewer::Line3D("Register Arm", hookEndFittingPoint, endPoint, 153, 50, 204, 255) };
+    std::vector<viewer::Line3D> lines;
+    // Drop bracket: bracketBottomPoint[0] → bracketUpperFixedPoint
+    if (!bracketBottomPoint.empty()) {
+        lines.push_back(viewer::Line3D("Register Arm Drop Bracket", bracketBottomPoint[0], bracketUpperFixedPoint, 153, 50, 204, 255));
+    }
+    // Register arm tube upper: bracketUpperFixedPoint → hookEndFittingPoint
+    if (hookEndFittingPoint.x != 0 || hookEndFittingPoint.y != 0 || hookEndFittingPoint.z != 0) {
+        lines.push_back(viewer::Line3D("Register Arm Upper", bracketUpperFixedPoint, hookEndFittingPoint, 153, 50, 204, 255));
+        // Register arm tube lower: hookEndFittingPoint → intersectionRegisterArmFixedPoint
+        if (intersectionRegisterArmFixedPoint.x != 0 || intersectionRegisterArmFixedPoint.y != 0 || intersectionRegisterArmFixedPoint.z != 0) {
+            lines.push_back(viewer::Line3D("Register Arm Lower", hookEndFittingPoint, intersectionRegisterArmFixedPoint, 153, 50, 204, 255));
+        }
+    }
+    // Eye clamp: eyeClampPoint → eyeClampFixedPoint
+    if (eyeClampPoint.x != 0 || eyeClampPoint.y != 0 || eyeClampPoint.z != 0) {
+        lines.push_back(viewer::Line3D("Register Arm Eye Clamp", eyeClampPoint, eyeClampFixedPoint, 180, 80, 220, 255));
+        // Also draw from bracketUpperFixedPoint to eyeClampPoint (end-to-eye section)
+        lines.push_back(viewer::Line3D("Register Arm End", endPoint, eyeClampPoint, 153, 50, 204, 255));
+    }
+    return lines;
 }
 
 } // namespace assemblies

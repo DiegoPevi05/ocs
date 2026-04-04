@@ -144,8 +144,47 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
         }
     }
 
+    // Compute hookClampIntersectionSupport and hookFixedPoint (required before injecting into register arm)
+    if (registerArm && !hookClampPoint.empty() && params.hook_end_clamp) {
+        double angleBetweenClampAndSupport = 270.0 + params.alpha;
+        double extension_rotation;
+        if (components::isTdpGt2_2(frame.model.type.configuration)) {
+            extension_rotation = params.hook_end_clamp->A
+                * std::tan(math::degreesToRadians(params.alpha + (-registerArm->params.alpha)))
+                * -1.0;
+        } else {
+            extension_rotation = params.hook_end_clamp->A
+                * std::tan(math::degreesToRadians(params.alpha + (-registerArm->params.alpha)));
+        }
+
+        double cosA = std::cos(math::degreesToRadians(angleBetweenClampAndSupport));
+        double sinA = std::sin(math::degreesToRadians(angleBetweenClampAndSupport));
+        math::Vec3 CwXYDir = { frame.directionPv.x * cosA, sinA, frame.directionPv.z * cosA };
+
+        for (const auto& pt : hookClampPoint) {
+            hookClampIntersectionSupport.push_back(
+                math::add(pt, math::scale(CwXYDir, params.hook_end_clamp->H + extension_rotation))
+            );
+        }
+
+        // hookFixedPoint from hookClampIntersectionSupport
+        double angleModified = components::isTdpGt2_2(frame.model.type.configuration)
+            ? 180.0 + registerArm->params.alpha
+            : registerArm->params.alpha;
+        double cosB = std::cos(math::degreesToRadians(angleModified));
+        double sinB = std::sin(math::degreesToRadians(angleModified));
+        math::Vec3 CwXYDir2 = { frame.directionPv.x * cosB, sinB, frame.directionPv.z * cosB };
+
+        for (const auto& pt : hookClampIntersectionSupport) {
+            hookFixedPoint.push_back(
+                math::add(pt, math::scale(CwXYDir2, params.hook_end_clamp->B))
+            );
+        }
+    }
+
     if (registerArm) {
-        registerArm->injectSteadyArmHooks(hookClampPoint);
+        // Inject the fully-derived hook fixed point (not the raw clamp point)
+        registerArm->injectSteadyArmHooks(!hookFixedPoint.empty() ? hookFixedPoint : hookClampPoint);
         registerArm->calculateGeometry(frame);
     }
 
@@ -222,11 +261,19 @@ std::vector<TubeDimension> SteadyArm::generateResults(const CantileverFrame& fra
 
 std::vector<viewer::Line3D> SteadyArm::getRenderLines() const {
     std::vector<viewer::Line3D> lines;
-    // Orange for Steady Arm
-    if (!endPoint.empty() && (hookEndFittingPoint.x != 0 || hookEndFittingPoint.y != 0 || hookEndFittingPoint.z != 0)) {
-        lines.push_back(viewer::Line3D("Steady Arm", endPoint[0], hookEndFittingPoint, 255, 128, 0, 255));
-    } else if (!fixedPoint.empty() && !hookClampPoint.empty()) {
+    // hookClampPoint is only populated for TDP>2.2 / CAI — use it as discriminator
+    if (!hookClampPoint.empty() && !fixedPoint.empty()) {
+        // TDP>2.2 / CAI: main steady arm tube is fixedPoint → hookClampPoint
         lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], hookClampPoint[0], 255, 128, 0, 255));
+        if (!hookClampIntersectionSupport.empty()) {
+            lines.push_back(viewer::Line3D("Steady Arm Hook Clamp", hookClampIntersectionSupport[0], hookClampPoint[0], 255, 165, 0, 255));
+        }
+        if (!hookFixedPoint.empty() && !hookClampIntersectionSupport.empty()) {
+            lines.push_back(viewer::Line3D("Steady Arm Hook Fixed", hookClampIntersectionSupport[0], hookFixedPoint[0], 255, 200, 0, 255));
+        }
+    } else if (!endPoint.empty() && (hookEndFittingPoint.x != 0 || hookEndFittingPoint.y != 0 || hookEndFittingPoint.z != 0)) {
+        // SBA / TDP<2.2
+        lines.push_back(viewer::Line3D("Steady Arm", endPoint[0], hookEndFittingPoint, 255, 128, 0, 255));
     }
     return lines;
 }

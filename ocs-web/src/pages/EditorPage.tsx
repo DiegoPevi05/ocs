@@ -222,9 +222,9 @@ export default function EditorPage() {
             setVanes(scene.vanes);
           }
           if (res.calculations && res.calculations.status === 'success') {
-             calcResultsRef.current = [res.calculations];
-             engineRef.current?.clearApiData();
-             engineRef.current?.addApiData(res.calculations);
+            calcResultsRef.current = [res.calculations];
+            engineRef.current?.clearApiData();
+            engineRef.current?.addApiData(res.calculations);
           }
         } else {
           api.locations.get(locationId).then(loc => {
@@ -236,7 +236,7 @@ export default function EditorPage() {
               setCantilevers(scene.cantilevers);
               setVanes(scene.vanes);
             }
-          }).catch(() => {/* offline */});
+          }).catch(() => {/* offline */ });
         }
       }).catch(() => {
         api.locations.get(locationId).then(loc => {
@@ -248,7 +248,7 @@ export default function EditorPage() {
             setCantilevers(scene.cantilevers);
             setVanes(scene.vanes);
           }
-        }).catch(() => {/* offline */});
+        }).catch(() => {/* offline */ });
       });
   }, [locationId]);
 
@@ -311,6 +311,7 @@ export default function EditorPage() {
   // Sync track/snap modes
   useEffect(() => { if (engineRef.current) engineRef.current.trackMode = trackMode; }, [trackMode]);
   useEffect(() => { if (engineRef.current) engineRef.current.enableSnap = autoSnap; }, [autoSnap]);
+  useEffect(() => { if (engineRef.current) engineRef.current.selFilter = selFilter; }, [selFilter]);
 
   // Trigger calculation when cantilevers change (debounced)
   const triggerCalculation = useCallback((cantiList: CantileverData[]) => {
@@ -433,7 +434,17 @@ export default function EditorPage() {
     };
 
     const handleViewerSelect = (e: Event) => {
-      const { minX, maxX, minZ, maxZ } = (e as CustomEvent).detail;
+      const { minX, maxX, minZ, maxZ, isPoint, hovered } = (e as CustomEvent).detail;
+
+      // If the user clicked (point) while an item was hovered, select exactly that item
+      if (isPoint && hovered) {
+        setSelectedTracks(hovered.type === 'track' ? [hovered.index] : []);
+        setSelectedPoles(hovered.type === 'pole' ? [hovered.index] : []);
+        setSelectedCantilevers(hovered.type === 'cantilever' ? [hovered.index] : []);
+        setSelectedVanes(hovered.type === 'vane' ? [hovered.index] : []);
+        return;
+      }
+
       const selT = new Set<number>();
       const selP = new Set<number>();
       const selC = new Set<number>();
@@ -567,6 +578,13 @@ export default function EditorPage() {
   const openEditCantilever = (idx: number) => {
     if (!cantilevers[idx]) return;
     setEditCantileverIdx(idx);
+    const c = cantilevers[idx];
+    if (engineRef.current) {
+      setViewMode('3D');
+      setDrawMode('none');
+      engineRef.current.setDrawMode('none');
+      engineRef.current.focusCantilever(c);
+    }
   };
 
   const handleSaveFromPanel = (updated: CantileverData) => {
@@ -578,12 +596,12 @@ export default function EditorPage() {
       if ((updated.zigzag ?? 250) !== (old.zigzag ?? 250)) {
         const newZz = updated.zigzag ?? 250;
         if (old.x2raw !== undefined && old.x1 !== undefined) {
-           const dx = old.x2raw - old.x1;
-           const dz = old.z2raw! - old.z1;
-           const len = Math.hypot(dx, dz);
-           let ux = 0, uz = 0;
-           if (len > 0) { ux = dx / len; uz = dz / len; }
-           result = { ...result, x2: old.x2raw + ux * newZz, z2: old.z2raw! + uz * newZz };
+          const dx = old.x2raw - old.x1;
+          const dz = old.z2raw! - old.z1;
+          const len = Math.hypot(dx, dz);
+          let ux = 0, uz = 0;
+          if (len > 0) { ux = dx / len; uz = dz / len; }
+          result = { ...result, x2: old.x2raw + ux * newZz, z2: old.z2raw! + uz * newZz };
         } else {
           const dx = old.x2 - old.x1, dz = old.z2 - old.z1;
           const len = Math.hypot(dx, dz);
@@ -600,6 +618,37 @@ export default function EditorPage() {
     });
     setEditCantileverIdx(null);
     setSelectedCantilevers([]);
+    setViewMode('2D');
+    engineRef.current?.setViewMode('2D');
+    engineRef.current?.resetCamera();
+  };
+
+  const handleCalculateFromPanel = (updated: CantileverData) => {
+    if (editCantileverIdx === null) return;
+    const temp = [...cantilevers];
+    const old = temp[editCantileverIdx];
+    let result = { ...updated };
+    if ((updated.zigzag ?? 250) !== (old.zigzag ?? 250)) {
+      const newZz = updated.zigzag ?? 250;
+      if (old.x2raw !== undefined && old.x1 !== undefined) {
+        const dx = old.x2raw - old.x1;
+        const dz = old.z2raw! - old.z1;
+        const len = Math.hypot(dx, dz);
+        let ux = 0, uz = 0;
+        if (len > 0) { ux = dx / len; uz = dz / len; }
+        result = { ...result, x2: old.x2raw + ux * newZz, z2: old.z2raw! + uz * newZz };
+      } else {
+        const dx = old.x2 - old.x1, dz = old.z2 - old.z1;
+        const len = Math.hypot(dx, dz);
+        if (len > 0) {
+          const oldZz = old.zigzag ?? 250;
+          const dirX = dx / len, dirZ = dz / len;
+          result = { ...result, x2: (old.x2 - dirX * oldZz) + dirX * newZz, z2: (old.z2 - dirZ * oldZz) + dirZ * newZz };
+        }
+      }
+    }
+    temp[editCantileverIdx] = result;
+    triggerCalculation(temp);
   };
 
 
@@ -882,7 +931,14 @@ export default function EditorPage() {
           <CantileverPanel
             cantilever={cantilevers[editCantileverIdx]}
             onSave={handleSaveFromPanel}
-            onClose={() => setEditCantileverIdx(null)}
+            onCalculate={handleCalculateFromPanel}
+            onClose={() => {
+              setEditCantileverIdx(null);
+              triggerCalculation(cantilevers);
+              setViewMode('2D');
+              engineRef.current?.setViewMode('2D');
+              engineRef.current?.resetCamera();
+            }}
           />
         )}
 

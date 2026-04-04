@@ -52,10 +52,11 @@ function Divider({ label }: { label: string }) {
 interface Props {
   cantilever: CantileverData;
   onSave: (updated: CantileverData) => void;
+  onCalculate?: (updated: CantileverData) => void;
   onClose: () => void;
 }
 
-export function CantileverPanel({ cantilever, onSave, onClose }: Props) {
+export function CantileverPanel({ cantilever, onSave, onCalculate, onClose }: Props) {
   const [form, setForm] = useState<CantileverData>({ ...cantilever });
 
   const set = <K extends keyof CantileverData>(key: K, val: CantileverData[K]) =>
@@ -66,16 +67,6 @@ export function CantileverPanel({ cantilever, onSave, onClose }: Props) {
 
   return (
     <>
-      {/* ── Overlay ── */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.6)',
-          zIndex: 200,
-        }}
-      />
-
       {/* ── Panel ── */}
       <div style={{
         position: 'fixed', top: 0, right: 0, bottom: 0,
@@ -231,6 +222,18 @@ export function CantileverPanel({ cantilever, onSave, onClose }: Props) {
               borderRadius: 4, cursor: 'pointer', fontSize: 13,
             }}
           >Cancel</button>
+
+          {onCalculate && (
+            <button
+              onClick={() => onCalculate(form)}
+              style={{
+                padding: '7px 18px', background: '#eab308',
+                border: 'none', color: '#111',
+                borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}
+            >Calculate</button>
+          )}
+
           <button
             onClick={() => onSave(form)}
             style={{
@@ -238,7 +241,7 @@ export function CantileverPanel({ cantilever, onSave, onClose }: Props) {
               border: 'none', color: '#fff',
               borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
             }}
-          >Save &amp; Calculate</button>
+          >Save</button>
         </div>
       </div>
 

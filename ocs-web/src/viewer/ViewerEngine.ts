@@ -66,8 +66,10 @@ export class ViewerEngine {
   private selectStartY: number = 0;
 
   // Track current dynamic data for rubberband & snap context
-  private dynData: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, x2raw?: number, z2raw?: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] } = { trackPoints: [], poles: [] };
+  private dynData: any = { trackPoints: [], poles: [] };
   public trackMode: 'rect' | 'poly' = 'rect';
+  public selFilter = { tracks: true, poles: true, cantilevers: true, vanes: true };
+  private hoveredState: { type: 'track' | 'pole' | 'cantilever' | 'vane', index: number } | null = null;
 
   // Pan state (2D)
   private panning = false;
@@ -621,6 +623,66 @@ export class ViewerEngine {
       }
 
       const w = this.toWorld(e);  // w.x = world X, w.y = world Z
+
+      if (this.drawMode === 'none' && !this.isSelecting) {
+        const threshold = 40 / this.cam2D.zoom;
+        let closestType: 'track' | 'pole' | 'cantilever' | 'vane' | null = null;
+        let closestIdx = -1;
+        let minDist = threshold;
+
+        const checkPt = (vx: number, vz: number, type: any, idx: number) => {
+          const d = Math.hypot(w.x - vx, w.y - vz);
+          if (d < minDist) { minDist = d; closestType = type; closestIdx = idx; }
+        };
+
+        const checkSegment = (x1: number, z1: number, x2: number, z2: number, type: any, idx: number) => {
+          const dx = x2 - x1, dz = z2 - z1;
+          const len2 = dx * dx + dz * dz;
+          if (len2 === 0) return checkPt(x1, z1, type, idx);
+          const t = Math.max(0, Math.min(1, ((w.x - x1) * dx + (w.y - z1) * dz) / len2));
+          const px = x1 + t * dx, pz = z1 + t * dz;
+          const d = Math.hypot(w.x - px, w.y - pz);
+          if (d < minDist) { minDist = d; closestType = type; closestIdx = idx; }
+        };
+
+        if (this.selFilter.poles && this.dynData.poles) {
+          this.dynData.poles.forEach((p: any, i: number) => checkPt(p.x, p.z || 0, 'pole', i));
+        }
+        if (this.selFilter.cantilevers && this.dynData.cantilevers) {
+          this.dynData.cantilevers.forEach((c: any, i: number) => {
+            const rawX = c.x2raw ?? c.x2;
+            const rawZ = c.z2raw ?? c.z2;
+            const dx = rawX - c.x1, dz = rawZ - c.z1;
+            const len = Math.hypot(dx, dz);
+            let finX = rawX, finZ = rawZ;
+            if (len > 0) {
+              const zz = c.zigzag ?? 250;
+              finX = rawX + (dx / len) * zz;
+              finZ = rawZ + (dz / len) * zz;
+            }
+            checkSegment(c.x1, c.z1, finX, finZ, 'cantilever', i);
+          });
+        }
+        if (this.selFilter.vanes && this.dynData.vanes) {
+          this.dynData.vanes.forEach((v: any, i: number) => checkSegment(v.x1, v.z1, v.x2, v.z2, 'vane', i));
+        }
+        if (this.selFilter.tracks && this.dynData.completedTracks) {
+          this.dynData.completedTracks.forEach((tr: any, i: number) => {
+            for (let j = 1; j < tr.length; j++) {
+              checkSegment(tr[j - 1].x, tr[j - 1].z, tr[j].x, tr[j].z, 'track', i);
+            }
+          });
+        }
+
+        if (this.hoveredState?.type !== closestType || this.hoveredState?.index !== closestIdx) {
+          this.hoveredState = closestType ? { type: closestType, index: closestIdx } : null;
+          this._renderDynamic();
+        }
+      } else if (this.hoveredState) {
+        this.hoveredState = null;
+        this._renderDynamic();
+      }
+
       const snapped = this.snapToGrid(w.x, w.y);
       let finalX = snapped.x, finalZ = snapped.y;
 
@@ -764,7 +826,7 @@ export class ViewerEngine {
       const maxZ = Math.max(w1.y, w2.y) + (dy < 3 ? 50 : 0);
 
       this.container.dispatchEvent(new CustomEvent('viewer-select', {
-        detail: { minX, maxX, minZ, maxZ, isPoint: dx < 3 && dy < 3 }
+        detail: { minX, maxX, minZ, maxZ, isPoint: dx < 3 && dy < 3, hovered: this.hoveredState }
       }));
     }
   }
@@ -784,6 +846,11 @@ export class ViewerEngine {
     this.cam2D.position.z = w.y + (this.cam2D.position.z - w.y) * ratio;  // w.y holds world Z
     this.cam2D.zoom = newZoom;
     this.cam2D.updateProjectionMatrix();
+
+    // Keep cursor constant screen size as we zoom
+    if (this.cursorGroup.visible) {
+      this.cursorGroup.scale.setScalar(1 / newZoom);
+    }
 
     this.updateGrid();
   }
@@ -1110,8 +1177,15 @@ export class ViewerEngine {
     }
   }
 
-  public setDynamicGeometry(data: { trackPoints: { x: number, z: number, y?: number, r?: number }[], poles: { x: number, z: number, y?: number, h?: number, label?: string }[], completedTracks?: { x: number, z: number, y?: number, r?: number, label?: string }[][], selectedTracks?: number[], selectedPoles?: number[], cantileverPoints?: { x: number, z: number, y?: number }[], cantilevers?: { x1: number, z1: number, x2: number, z2: number, x2raw?: number, z2raw?: number, zigzag?: number, label?: string }[], vanes?: { x1: number, z1: number, x2: number, z2: number, label?: string }[], vanePoints?: { x: number, z: number }[], selectedCantilevers?: number[], selectedVanes?: number[] }): void {
+  public setDynamicGeometry(data: any): void {
     this.dynData = data;
+    this._renderDynamic();
+  }
+
+  private _renderDynamic(): void {
+    const data = this.dynData;
+    if (!data) return;
+
     // Clear dynamic group
     this.dynamicGroup.traverse((obj) => {
       const o = obj as THREE.Line | THREE.Mesh;
@@ -1126,7 +1200,7 @@ export class ViewerEngine {
       this.dynamicGroup.remove(this.dynamicGroup.children[0]);
     }
 
-    const renderTrack = (trackArr: { x: number, z: number, y?: number, r?: number }[], isActive: boolean, isSelected: boolean) => {
+    const renderTrack = (trackArr: { x: number, z: number, y?: number, r?: number }[], isActive: boolean, isSelected: boolean, trackIdx?: number) => {
       if (trackArr.length === 0) return;
       const pts: THREE.Vector3[] = [];
       trackArr.forEach((curr, i) => {
@@ -1164,8 +1238,9 @@ export class ViewerEngine {
       });
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
 
-      const trackColor = isSelected ? 0xffa500 : (isActive ? 0x3b82f6 : 0x1d4ed8);
-      const nodeColor = isSelected ? 0xfde047 : (isActive ? 0x93c5fd : 0x60a5fa);
+      const isHovered = trackIdx !== undefined && this.hoveredState?.type === 'track' && this.hoveredState?.index === trackIdx;
+      const trackColor = isSelected ? 0xffa500 : (isHovered ? 0xfef08a : (isActive ? 0x3b82f6 : 0x1d4ed8));
+      const nodeColor = isSelected ? 0xfef08a : (isHovered ? 0xfef08a : (isActive ? 0x93c5fd : 0x60a5fa));
 
       const mat = new THREE.LineBasicMaterial({ color: trackColor });
       this.dynamicGroup.add(new THREE.Line(geo, mat));
@@ -1182,14 +1257,15 @@ export class ViewerEngine {
     };
 
     if (data.completedTracks) {
-      data.completedTracks.forEach((tr, i) => renderTrack(tr, false, data.selectedTracks?.includes(i) || false));
+      data.completedTracks.forEach((tr: any, i: number) => renderTrack(tr, false, data.selectedTracks?.includes(i) || false, i));
     }
     renderTrack(data.trackPoints, true, false);
 
     // Render poles as circles in 2D / cylinders in 3D
-    data.poles.forEach((p, i) => {
+    data.poles.forEach((p: any, i: number) => {
       const isSelected = data.selectedPoles?.includes(i) || false;
-      const poleColor = isSelected ? 0xffa500 : 0xef4444;
+      const isHovered = this.hoveredState?.type === 'pole' && this.hoveredState?.index === i;
+      const poleColor = isSelected ? 0xffa500 : (isHovered ? 0xfde047 : 0xef4444);
 
       // 2D representation (flat circle)
       const cgeo = new THREE.CircleGeometry(250, 32);
@@ -1213,9 +1289,10 @@ export class ViewerEngine {
 
     // Render committed cantilevers
     if (data.cantilevers) {
-      data.cantilevers.forEach((c, ci) => {
+      data.cantilevers.forEach((c: any, ci: number) => {
         const isSelected = data.selectedCantilevers?.includes(ci) ?? false;
-        const color = isSelected ? 0xfbbf24 : 0xf59e0b;
+        const isHovered = this.hoveredState?.type === 'cantilever' && this.hoveredState?.index === ci;
+        const color = isSelected ? 0xfbbf24 : (isHovered ? 0xfde047 : 0x22c55e);
         const rawX = c.x2raw ?? c.x2;
         const rawZ = c.z2raw ?? c.z2;
 
@@ -1257,9 +1334,10 @@ export class ViewerEngine {
 
     // Render committed vanes
     if (data.vanes) {
-      data.vanes.forEach((v, vi) => {
+      data.vanes.forEach((v: any, vi: number) => {
         const isSelected = data.selectedVanes?.includes(vi) ?? false;
-        const color = isSelected ? 0xfde047 : 0xeab308;
+        const isHovered = this.hoveredState?.type === 'vane' && this.hoveredState?.index === vi;
+        const color = isSelected ? 0xfde047 : (isHovered ? 0xfef08a : 0xeab308);
         const geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(v.x1, 0, v.z1),
           new THREE.Vector3(v.x2, 0, v.z2)
@@ -1458,6 +1536,41 @@ export class ViewerEngine {
   public resetCamera(): void {
     this.fitCamera();
     this.updateGrid();
+  }
+
+  public focusCantilever(c: { x1: number, z1: number, x2: number, z2: number, x2raw?: number, z2raw?: number, zigzag?: number, contactWireHeight?: number }): void {
+    this.setViewMode('3D');
+
+    const rawX = c.x2raw ?? c.x2;
+    const rawZ = c.z2raw ?? c.z2;
+
+    const dx = rawX - c.x1;
+    const dz = rawZ - c.z1;
+    const len = Math.hypot(dx, dz);
+    let finalX = rawX, finalZ = rawZ;
+    if (len > 0) {
+      const zz = c.zigzag ?? 250;
+      finalX = rawX + (dx / len) * zz;
+      finalZ = rawZ + (dz / len) * zz;
+    }
+
+    const cx = (c.x1 + finalX) / 2;
+    const cz = (c.z1 + finalZ) / 2;
+    const cy = c.contactWireHeight ? c.contactWireHeight : 6000;
+
+    let px = 0, pz = 1;
+    if (len > 0) {
+      // Normal vector, perpendicular to (dx, dz)
+      px = -dz / len;
+      pz = dx / len;
+    }
+
+    const viewDistance = 3500;
+
+    this.cam3D.position.set(cx + px * viewDistance, cy, cz + pz * viewDistance);
+    this.cam3D.lookAt(cx, cy, cz);
+    this.controls.target.set(cx, cy, cz);
+    this.controls.update();
   }
 
   public dispose(): void {

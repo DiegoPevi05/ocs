@@ -43,7 +43,8 @@ export type DrawMode = 'none' | 'track' | 'pole' | 'cantilever' | 'vane';
 
 export interface TrackPoint { x: number; z: number; y?: number; r?: number; }
 export interface TrackData { id?: string; label: string; points: TrackPoint[]; }
-export interface PoleData { id?: string; label?: string; x: number; z: number; y?: number; h?: number;
+export interface PoleData {
+  id?: string; label?: string; x: number; z: number; y?: number; h?: number;
   cantileversQuantity?: number;  // how many catenary wires on this pole, default 1
   catSeparation?: number;        // vertical separation between catenary wires mm, default 720
 }
@@ -67,6 +68,9 @@ export interface CantileverData {
   curveRadiusDirection?: string;       // 'inside' | 'outside', default 'inside'
   trackGauge?: number;                 // mm, default 1435
   configuration?: string;              // "TDP>2.2" | "TDP<2.2" | "CAI" | "SBA"
+  steadyArmAlpha?: number;             // degrees, default -2.0
+  registerArmAlpha?: number;           // degrees, default 2.0
+  steadyArmLength?: number;            // mm, default 1200
 }
 export interface VaneData {
   id?: string; label?: string;

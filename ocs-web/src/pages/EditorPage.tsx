@@ -339,12 +339,15 @@ export default function EditorPage() {
           zigzag: c.zigzag ?? 250,
           supportOffset: c.supportOffset ?? 1440,
           fixingDistance: c.fixingDistance ?? 1500,
-          bottomFixedHeight: c.bottomFixedHeight ?? 800,
+          bottomFixedHeight: c.bottomFixedHeight ?? 5440,
           u: c.u ?? 0,
           curveRadiusDirection: c.curveRadiusDirection ?? 'inside',
           trackGauge: c.trackGauge ?? 1435,
           cantileversQuantity: matchPole?.cantileversQuantity ?? 1,
           catSeparation: matchPole?.catSeparation ?? 720,
+          steadyArmAlpha: c.steadyArmAlpha ?? -2,
+          registerArmAlpha: c.registerArmAlpha ?? 2,
+          steadyArmLength: c.steadyArmLength ?? 1200,
         };
       });
 
@@ -849,11 +852,14 @@ export default function EditorPage() {
               zigzag: 250,
               supportOffset: 1440,
               fixingDistance: 1500,
-              bottomFixedHeight: 800,
+              bottomFixedHeight: 5440,
               u: 0,
               curveRadiusDirection: 'inside',
               trackGauge: 1435,
               configuration: 'TDP>2.2',
+              steadyArmAlpha: -2,
+              registerArmAlpha: 2,
+              steadyArmLength: 1200,
             }}
             onSave={handleCreateFromPanel}
             onClose={() => setCantileverModal(null)}

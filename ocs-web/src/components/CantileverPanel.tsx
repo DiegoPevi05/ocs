@@ -116,7 +116,15 @@ export function CantileverPanel({ cantilever, onSave, onCalculate, onClose }: Pr
           <Field label="Configuration">
             <select
               value={form.configuration ?? 'TDP>2.2'}
-              onChange={e => set('configuration', e.target.value)}
+              onChange={e => {
+                const cfg = e.target.value;
+                setForm(f => ({
+                  ...f,
+                  configuration: cfg,
+                  // auto-flip register arm alpha default per configuration
+                  registerArmAlpha: cfg === 'CAI' ? -2 : 2,
+                }));
+              }}
               style={{ ...INPUT, cursor: 'pointer' }}
             >
               <option value="TDP>2.2">TDP &gt; 2.2</option>
@@ -171,7 +179,7 @@ export function CantileverPanel({ cantilever, onSave, onCalculate, onClose }: Pr
           {/* Bottom fixed + fixing distance */}
           <Row>
             <Field label="Bottom Fixed Height (mm)">
-              <input type="number" value={form.bottomFixedHeight ?? 800}
+              <input type="number" value={form.bottomFixedHeight ?? 5440}
                 onChange={e => set('bottomFixedHeight', +e.target.value)} style={INPUT} />
             </Field>
             <Field label="Fixing Distance (mm)">
@@ -203,6 +211,31 @@ export function CantileverPanel({ cantilever, onSave, onCalculate, onClose }: Pr
               <option value="outside">Outside</option>
             </select>
           </Field>
+
+          <Divider label="Arm Geometry" />
+
+          <Row>
+            <Field label="Steady Arm α (°)" hint="Tilt angle of steady arm">
+              <input type="number" step="0.1" value={form.steadyArmAlpha ?? -2}
+                onChange={e => set('steadyArmAlpha', +e.target.value)} style={INPUT} />
+            </Field>
+            {(form.configuration === 'TDP>2.2' || form.configuration === 'CAI' || !form.configuration) && (
+              <Field label="Steady Arm Length (mm)" hint="Horizontal arm reach (TDP>2.2 / CAI)">
+                <input type="number" value={form.steadyArmLength ?? 1200}
+                  onChange={e => set('steadyArmLength', +e.target.value)} style={INPUT} />
+              </Field>
+            )}
+          </Row>
+
+          {(form.configuration === 'TDP>2.2' || form.configuration === 'CAI' || !form.configuration) && (
+            <Row>
+              <Field label="Register Arm α (°)" hint="Tilt angle of register arm">
+                <input type="number" step="0.1"
+                  value={form.registerArmAlpha ?? (form.configuration === 'CAI' ? -2 : 2)}
+                  onChange={e => set('registerArmAlpha', +e.target.value)} style={INPUT} />
+              </Field>
+            </Row>
+          )}
 
         </div>
 

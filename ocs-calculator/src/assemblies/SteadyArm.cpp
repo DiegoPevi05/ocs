@@ -205,7 +205,7 @@ void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
         return math::Vec3{ 0.5*(pt1.x + pt2.x), 0.5*(pt1.y + pt2.y), 0.5*(pt1.z + pt2.z) };
     };
 
-    if (components::isSba(frame.model.type.configuration)) {
+    if (components::isSba(frame.model.type.configuration) || components::isTdpLt2_2(frame.model.type.configuration)) {
         if (!endPoint.empty()) {
             math::Vec3 P1 = bracketTube->bottomFixedPoint;
             math::Vec3 D1 = math::getDirectionVector(bracketTube->upperEyeClampClevisFixedPoint, P1);

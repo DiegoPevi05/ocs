@@ -85,6 +85,22 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     pole3D.model = poleModel; 
     pole3D.globalPosition = polePos;
     
+    int numCantilevers = j.value("cantileversQuantity", 1);
+    double catSeparation = j.value("catSeparation", 720.0);
+    double supportOffset = j.value("supportOffset", 1440.0);
+    double contactWireHeight = j.value("contactWireHeight", 5400.0);
+    double systemHeight = j.value("systemHeight", 1000.0);
+    double zigzag = j.value("zigzag", 200.0);
+    double contactWireVerticalOffset = j.value("contactWireVerticalOffset", 120.0);
+    double fixingDistance = j.value("fixingDistance", 1500.0);
+    double bottomFixedHeight = j.value("bottomFixedHeight", 5440.0);
+    double u = j.value("u", 0.0);
+    double trackGauge = j.value("trackGauge", 1435.0);
+    double steadyArmAlpha = j.value("steadyArmAlpha", -2.0);
+    double defaultRegisterAlpha = (configType == "CAI") ? -2.0 : 2.0;
+    double registerArmAlpha = j.value("registerArmAlpha", defaultRegisterAlpha);
+    double steadyArmLength = j.value("steadyArmLength", 1200.0);
+
     auto stayTubeParams = assemblies::StayTubeParams{
         0.0, { 55.0, 3.5 }, { 60.0, 400.0, 350.0 }, 
         { { 100.0, 200.0, 50.0, 50.0, 150.0 }, 100.0, 80.0 },
@@ -95,7 +111,7 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
         { 150.0, 50.0, 100.0 }, { 50.0 }
     };
     auto steadyArmParams = assemblies::SteadyArmParams{
-        -2.0, 1200.0, 100.0, std::nullopt, std::nullopt,
+        steadyArmAlpha, steadyArmLength, 100.0, std::nullopt, std::nullopt,
         { 33.7, 2.5 }, 
         components::HookEndFitting{100.0, 20.0},
         components::HookEndClamp{50.0, 40.0, 10.0, 10.0},
@@ -105,7 +121,7 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     };
     
     assemblies::RegisterArmParams regParams;
-    regParams.alpha = 2.0;
+    regParams.alpha = registerArmAlpha;
     regParams.drop_bracket_distance = 150.0;
     regParams.eye_clamp_distance = 250.0;
     regParams.tube = { 33.7, 3.2 };
@@ -113,18 +129,6 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     regParams.drop_bracket = { 50.0, 100.0, 20.0, 30.0 };
     regParams.eye_clamp = { 35.0 };
     regParams.hook_end_fitting = { 100.0, 20.0 };
-    
-    int numCantilevers = j.value("cantileversQuantity", 1);
-    double catSeparation = j.value("catSeparation", 720.0);
-    double supportOffset = j.value("supportOffset", 1440.0);
-    double contactWireHeight = j.value("contactWireHeight", 5400.0);
-    double systemHeight = j.value("systemHeight", 1000.0);
-    double zigzag = j.value("zigzag", 200.0);
-    double contactWireVerticalOffset = j.value("contactWireVerticalOffset", 120.0);
-    double fixingDistance = j.value("fixingDistance", 1500.0);
-    double bottomFixedHeight = j.value("bottomFixedHeight", 800.0);
-    double u = j.value("u", 0.0);
-    double trackGauge = j.value("trackGauge", 1435.0);
 
     std::string crvDir = j.value("curveRadiusDirection", "inside");
     components::CurveRadiusDirection curveDir =
@@ -133,7 +137,7 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
 
     components::Track track = { trackGauge, { 50.0 } };
 
-    components::Pole poleOrchestrator(pole3D, 500.0, 150.0, 4500.0, supportOffset, catSeparation, pv);
+    components::Pole poleOrchestrator(pole3D, catSeparation, supportOffset, bottomFixedHeight, fixingDistance, 0.0, pv);
 
     for (int i=0; i < numCantilevers; ++i) {
         auto builder = std::make_shared<CantileverBuilder>(
@@ -151,13 +155,13 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
             
             assemblies::RegisterArmParams iterRegParams = regParams;
             if (i % 2 != 0) {
-                iterRegParams.alpha = -2.0;
+                iterRegParams.alpha = -registerArmAlpha;
                 iterRegParams.drop_bracket_distance = 200.0;
             }
             auto regArm = std::make_shared<assemblies::RegisterArm>(iterRegParams);
             
             assemblies::SteadyArmParams iterSteady = steadyArmParams;
-            if (i % 2 != 0) iterSteady.alpha = -2.0;
+            if (i % 2 != 0) iterSteady.alpha = -steadyArmAlpha;
             auto steadyArm = std::make_shared<assemblies::SteadyArm>(iterSteady, bracketTube, regArm);
             builder->addAssembly(stayTube).addAssembly(bracketTube).addAssembly(regArm).addAssembly(steadyArm);
         } else {

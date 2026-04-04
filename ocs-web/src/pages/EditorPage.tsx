@@ -132,7 +132,7 @@ export default function EditorPage() {
   const [poles, setPoles] = useState<PoleData[]>([]);
   const [cantilevers, setCantilevers] = useState<CantileverData[]>([]);
   const [vanes, setVanes] = useState<VaneData[]>([]);
-  const [vanePoints, setVanePoints] = useState<{ x: number; z: number }[]>([]);
+  const [vaneFirstCantIdx, setVaneFirstCantIdx] = useState<number | null>(null);
 
   // Selection
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
@@ -157,18 +157,13 @@ export default function EditorPage() {
 
   // Vane modal form state
   const [vaneFormLabel, setVaneFormLabel] = useState('');
-  const [vaneFormCwWeight, setVaneFormCwWeight] = useState(0.0019);
-  const [vaneFormCwTension, setVaneFormCwTension] = useState(1600);
-  const [vaneFormSwWeight, setVaneFormSwWeight] = useState(0.0024);
-  const [vaneFormSwTension, setVaneFormSwTension] = useState(2000);
-  const [vaneFormInitSep, setVaneFormInitSep] = useState(5000);
   const [vaneFormDroppers, setVaneFormDroppers] = useState(0);
-  const [vaneFormDropWeight, setVaneFormDropWeight] = useState(0.0006);
-  const [vaneFormStepSize, setVaneFormStepSize] = useState(0);
+  const [vaneFormInitialSep, setVaneFormInitialSep] = useState(5000);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
   const stompRef = useRef<StompClient | null>(null);
+  const pendingVaneCantRef = useRef<{ cantileverIdx1: number; cantileverIdx2: number } | null>(null);
   const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const calcResultsRef = useRef<ApiResponse[]>([]);
   const calcExpectedRef = useRef<number>(0);
@@ -194,8 +189,8 @@ export default function EditorPage() {
   useEffect(() => { selectedCantiRef.current = selectedCantilevers; }, [selectedCantilevers]);
   const selectedVanesRef = useRef(selectedVanes);
   useEffect(() => { selectedVanesRef.current = selectedVanes; }, [selectedVanes]);
-  const vanePointsRef = useRef(vanePoints);
-  useEffect(() => { vanePointsRef.current = vanePoints; }, [vanePoints]);
+  const vaneFirstCantIdxRef = useRef(vaneFirstCantIdx);
+  useEffect(() => { vaneFirstCantIdxRef.current = vaneFirstCantIdx; }, [vaneFirstCantIdx]);
 
   // Mount engine
   useEffect(() => {
@@ -276,9 +271,8 @@ export default function EditorPage() {
       client.subscribe('/topic/vane-result', msg => {
         try {
           const data = JSON.parse(msg.body);
-          if (data.status === 'success' && data.vane) {
-            // Wrap vane response in ApiResponse structure for rendering
-            engineRef.current?.loadData({ status: 'success', calculation_time_ms: 0, poles: [{ lines: data.vane.lines || [], cantilevers: [] }] });
+          if (data.status === 'success' && data.vane && data._vaneIdx !== undefined) {
+            engineRef.current?.loadVaneLines(data.vane.lines || [], data._vaneIdx.toString());
           }
         } catch { /* ignore */ }
       });
@@ -297,10 +291,10 @@ export default function EditorPage() {
   useEffect(() => {
     engineRef.current?.setDynamicGeometry({
       trackPoints, poles, completedTracks, selectedTracks, selectedPoles,
-      cantileverPoints: [], cantilevers, vanes, vanePoints,
+      cantileverPoints: [], cantilevers, vanes, vaneFirstCantIdx,
       selectedCantilevers, selectedVanes,
     });
-  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vanePoints, selectedCantilevers, selectedVanes]);
+  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes]);
 
   // Sync zigzag to engine for preview
   useEffect(() => {
@@ -357,6 +351,40 @@ export default function EditorPage() {
 
   useEffect(() => { triggerCalculation(cantilevers); }, [cantilevers, triggerCalculation]);
 
+  const triggerVaneCalculation = useCallback((vaneList: VaneData[], cantList: CantileverData[]) => {
+    if (!stompRef.current?.connected) return;
+    vaneList.forEach((v, vIdx) => {
+      const c1 = cantList[v.cantileverIdx1];
+      const c2 = cantList[v.cantileverIdx2];
+      if (!c1 || !c2) return;
+      const cwH1 = c1.contactWireHeight ?? 5400;
+      const sysH1 = c1.systemHeight ?? 1000;
+      const cwH2 = c2.contactWireHeight ?? 5400;
+      const sysH2 = c2.systemHeight ?? 1000;
+      const payload = {
+        _vaneIdx: vIdx,
+        cw_start: [c1.x2, cwH1, -c1.z2],
+        sw_start: [c1.x2, cwH1 + sysH1, -c1.z2],
+        cw_end: [c2.x2, cwH2, -c2.z2],
+        sw_end: [c2.x2, cwH2 + sysH2, -c2.z2],
+        qty_droppers: v.qtyDroppers ?? 0,
+        initial_separation: v.initialSeparation ?? 5000,
+        step_size: 500,  // fixed 500mm rendering grid for smooth wire curves
+        cw_weight: v.cwWeight ?? 0.0019,
+        cw_tension: v.cwTension ?? 1600,
+        sw_weight: v.swWeight ?? 0.0024,
+        sw_tension: v.swTension ?? 2000,
+        dropper_weight: v.dropperWeight ?? 0.0006,
+      };
+      stompRef.current?.publish({ destination: '/app/calculate/vane', body: JSON.stringify(payload) });
+    });
+  }, []);
+
+  // Cascade vane recalculation when cantilevers change
+  useEffect(() => {
+    if (vanes.length > 0) triggerVaneCalculation(vanes, cantilevers);
+  }, [cantilevers, vanes, triggerVaneCalculation]);
+
   // Save to API
   const saveScene = useCallback(async (
     tracks = completedTracksRef.current,
@@ -388,7 +416,7 @@ export default function EditorPage() {
   // viewer-click handler
   useEffect(() => {
     const handleViewerClick = (e: Event) => {
-      const { x, z, y, r, mode } = (e as CustomEvent).detail;
+      const { x, z, y, r, mode, cantileverIdx } = (e as CustomEvent).detail;
 
       if (mode === 'track') {
         const newPoints = [...trackPointsRef.current, { x, z, y, r }];
@@ -425,13 +453,43 @@ export default function EditorPage() {
         setCantileverModal({ x1: x, z1: z, x2raw: foot.x, z2raw: foot.z, tx: foot.tx, tz: foot.tz });
 
       } else if (mode === 'vane') {
-        const pts = vanePointsRef.current;
-        if (pts.length === 0) {
-          setVanePoints([{ x, z }]);
+        const firstIdx = vaneFirstCantIdxRef.current;
+        const clickedIdx: number = cantileverIdx ?? -1;
+        if (clickedIdx < 0) return; // must click on a cantilever endpoint
+        const cantList = cantileversRef.current;
+
+        if (firstIdx === null) {
+          // First click: record first cantilever
+          setVaneFirstCantIdx(clickedIdx);
         } else {
-          setVaneModal({ x1: pts[0].x, z1: pts[0].z, x2: x, z2: z });
-          setVanePoints([]);
+          // Second click: must be a different cantilever
+          if (clickedIdx === firstIdx) return;
+
+          // Check max-2 vanes per cantilever constraint
+          const currentVanes = vanesRef.current;
+          const c1Vanes = currentVanes.filter(v => v.cantileverIdx1 === firstIdx || v.cantileverIdx2 === firstIdx).length;
+          const c2Vanes = currentVanes.filter(v => v.cantileverIdx1 === clickedIdx || v.cantileverIdx2 === clickedIdx).length;
+          if (c1Vanes >= 2) { alert('Cantilever 1 already has 2 vanes'); return; }
+          if (c2Vanes >= 2) { alert('Cantilever 2 already has 2 vanes'); return; }
+
+          // Check not already connected
+          const alreadyLinked = currentVanes.some(v =>
+            (v.cantileverIdx1 === firstIdx && v.cantileverIdx2 === clickedIdx) ||
+            (v.cantileverIdx1 === clickedIdx && v.cantileverIdx2 === firstIdx)
+          );
+          if (alreadyLinked) { alert('These cantilevers are already linked by a vane'); return; }
+
+          const c1 = cantList[firstIdx];
+          const c2 = cantList[clickedIdx];
+          if (!c1 || !c2) return;
+
+          setVaneModal({ x1: c1.x2, z1: c1.z2, x2: c2.x2, z2: c2.z2 });
+          setVaneFirstCantIdx(null);
           setVaneFormLabel('');
+          setVaneFormDroppers(0);
+          setVaneFormInitialSep(5000);
+          // Store pending cantilever indices via a ref for use in saveVane
+          (pendingVaneCantRef as any).current = { cantileverIdx1: firstIdx, cantileverIdx2: clickedIdx };
         }
       }
     };
@@ -507,12 +565,26 @@ export default function EditorPage() {
         if (selT.length || selP.length || selC.length || selV.length) {
           setCompletedTracks(prev => prev.filter((_, i) => !selT.includes(i)));
           setPoles(prev => prev.filter((_, i) => !selP.includes(i)));
-          setCantilevers(prev => prev.filter((_, i) => !selC.includes(i)));
-          setVanes(prev => prev.filter((_, i) => !selV.includes(i)));
+          if (selC.length) {
+            // Build index remapping: old index → new index (-1 if deleted)
+            const oldCants = cantileversRef.current;
+            const newCants = oldCants.filter((_, i) => !selC.includes(i));
+            const idxMap = new Array(oldCants.length).fill(-1);
+            let ni = 0;
+            oldCants.forEach((_, oi) => { if (!selC.includes(oi)) idxMap[oi] = ni++; });
+
+            setCantilevers(newCants);
+            setVanes(prev => prev
+              .filter(v => idxMap[v.cantileverIdx1] !== -1 && idxMap[v.cantileverIdx2] !== -1)
+              .map(v => ({ ...v, cantileverIdx1: idxMap[v.cantileverIdx1], cantileverIdx2: idxMap[v.cantileverIdx2] }))
+            );
+          } else {
+            setVanes(prev => prev.filter((_, i) => !selV.includes(i)));
+          }
           setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
         }
       } else if (e.key === 'Escape') {
-        setTrackPoints([]); setVanePoints([]);
+        setTrackPoints([]); setVaneFirstCantIdx(null);
         if (drawMode !== 'none') { setDrawMode('none'); engineRef.current?.setDrawMode('none'); }
         setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
       }
@@ -567,14 +639,24 @@ export default function EditorPage() {
   const saveVane = () => {
     if (!vaneModal) return;
     if (!vaneFormLabel.trim()) { alert('Label is required'); return; }
+    const pending = pendingVaneCantRef.current;
+    if (!pending) return;
     const newV: VaneData = {
-      ...vaneModal, label: vaneFormLabel.trim(),
-      cwWeight: vaneFormCwWeight, cwTension: vaneFormCwTension,
-      swWeight: vaneFormSwWeight, swTension: vaneFormSwTension,
-      initialSeparation: vaneFormInitSep, qtyDroppers: vaneFormDroppers,
-      dropperWeight: vaneFormDropWeight, stepSize: vaneFormStepSize,
+      cantileverIdx1: pending.cantileverIdx1,
+      cantileverIdx2: pending.cantileverIdx2,
+      x1: vaneModal.x1, z1: vaneModal.z1,
+      x2: vaneModal.x2, z2: vaneModal.z2,
+      label: vaneFormLabel.trim(),
+      qtyDroppers: vaneFormDroppers,
+      initialSeparation: vaneFormInitialSep,
     };
-    setVanes(prev => [...prev, newV]);
+    setVanes(prev => {
+      const next = [...prev, newV];
+      saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, next);
+      triggerVaneCalculation([newV], cantileversRef.current);
+      return next;
+    });
+    pendingVaneCantRef.current = null;
     setVaneModal(null);
   };
 
@@ -659,14 +741,8 @@ export default function EditorPage() {
     const v = vanes[idx];
     if (!v) return;
     setVaneFormLabel(v.label ?? '');
-    setVaneFormCwWeight(v.cwWeight ?? 0.0019);
-    setVaneFormCwTension(v.cwTension ?? 1600);
-    setVaneFormSwWeight(v.swWeight ?? 0.0024);
-    setVaneFormSwTension(v.swTension ?? 2000);
-    setVaneFormInitSep(v.initialSeparation ?? 5000);
     setVaneFormDroppers(v.qtyDroppers ?? 0);
-    setVaneFormDropWeight(v.dropperWeight ?? 0.0006);
-    setVaneFormStepSize(v.stepSize ?? 0);
+    setVaneFormInitialSep(v.initialSeparation ?? 5000);
     setEditVaneIdx(idx);
   };
 
@@ -677,11 +753,11 @@ export default function EditorPage() {
       const next = [...prev];
       next[editVaneIdx] = {
         ...next[editVaneIdx], label: vaneFormLabel.trim(),
-        cwWeight: vaneFormCwWeight, cwTension: vaneFormCwTension,
-        swWeight: vaneFormSwWeight, swTension: vaneFormSwTension,
-        initialSeparation: vaneFormInitSep, qtyDroppers: vaneFormDroppers,
-        dropperWeight: vaneFormDropWeight, stepSize: vaneFormStepSize,
+        qtyDroppers: vaneFormDroppers,
+        initialSeparation: vaneFormInitialSep,
       };
+      saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, next);
+      triggerVaneCalculation([next[editVaneIdx]], cantileversRef.current);
       return next;
     });
     setEditVaneIdx(null);
@@ -727,7 +803,7 @@ export default function EditorPage() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Tracks</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Poles</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.cantilevers} onChange={e => setSelFilter(f => ({ ...f, cantilevers: e.target.checked }))} style={{ accentColor: '#f59e0b', cursor: 'pointer' }} /> Cantilevers</label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.vanes} onChange={e => setSelFilter(f => ({ ...f, vanes: e.target.checked }))} style={{ accentColor: '#eab308', cursor: 'pointer' }} /> Vanes</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.vanes} onChange={e => setSelFilter(f => ({ ...f, vanes: e.target.checked }))} style={{ accentColor: '#9333ea', cursor: 'pointer' }} /> Vanes</label>
                   {totalSelected > 0 && (
                     <div style={{ marginTop: 4, paddingTop: 6, borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <span style={{ color: '#94a3b8', fontSize: 10 }}>{totalSelected} selected</span>
@@ -735,7 +811,7 @@ export default function EditorPage() {
                         <button onClick={() => openEditCantilever(selectedCantilevers[0])} style={{ padding: '3px 8px', background: '#f59e0b', border: 'none', color: '#000', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Cantilever</button>
                       )}
                       {selectedVanes.length === 1 && (
-                        <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '3px 8px', background: '#eab308', border: 'none', color: '#000', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Vane</button>
+                        <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '3px 8px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Vane</button>
                       )}
                       {selectedPoles.length === 1 && (
                         <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '3px 8px', background: '#ef4444', border: 'none', color: '#fff', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Pole</button>
@@ -780,7 +856,7 @@ export default function EditorPage() {
             <LegendItem color="#3b82f6" label="Railway Track" />
             <LegendItem color="#ef4444" label="Catenary Pole" />
             <LegendItem color="#22c55e" label="Cantilever" />
-            <LegendItem color="#eab308" label="Vane" />
+            <LegendItem color="#9333ea" label="Vane" />
           </div>
         </aside>
 
@@ -867,54 +943,25 @@ export default function EditorPage() {
         )}
 
         {vaneModal && (
-          <Modal title="Configure Vane" onClose={() => setVaneModal(null)}>
+          <Modal title="Configure Vane" onClose={() => { setVaneModal(null); pendingVaneCantRef.current = null; }}>
             <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
             <input value={vaneFormLabel} onChange={e => setVaneFormLabel(e.target.value)} style={INP} autoFocus />
-
             <div style={ROW}>
               <div style={{ flex: 1 }}>
-                <label style={LBL}>CW Weight (kg/m)</label>
-                <input type="number" step="0.0001" value={vaneFormCwWeight} onChange={e => setVaneFormCwWeight(+e.target.value)} style={INP} />
+                <label style={LBL}>Qty Droppers <span style={{ color: '#64748b', fontSize: 10 }}>(0 = auto)</span></label>
+                <input type="number" min={0} value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>CW Tension (N)</label>
-                <input type="number" value={vaneFormCwTension} onChange={e => setVaneFormCwTension(+e.target.value)} style={INP} />
-              </div>
-            </div>
-            <div style={ROW}>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>SW Weight (kg/m)</label>
-                <input type="number" step="0.0001" value={vaneFormSwWeight} onChange={e => setVaneFormSwWeight(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>SW Tension (N)</label>
-                <input type="number" value={vaneFormSwTension} onChange={e => setVaneFormSwTension(+e.target.value)} style={INP} />
-              </div>
-            </div>
-            <div style={ROW}>
               <div style={{ flex: 1 }}>
                 <label style={LBL}>Initial Separation (mm)</label>
-                <input type="number" value={vaneFormInitSep} onChange={e => setVaneFormInitSep(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Qty Droppers</label>
-                <input type="number" value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
+                <input type="number" min={0} value={vaneFormInitialSep} onChange={e => setVaneFormInitialSep(+e.target.value)} style={INP} />
               </div>
             </div>
-            <div style={ROW}>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Dropper Weight (kg)</label>
-                <input type="number" step="0.0001" value={vaneFormDropWeight} onChange={e => setVaneFormDropWeight(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Step Size</label>
-                <input type="number" value={vaneFormStepSize} onChange={e => setVaneFormStepSize(+e.target.value)} style={INP} />
-              </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>
+              Inter-dropper spacing = (vane length − 2 × initial separation) ÷ (droppers − 1), calculated automatically.
             </div>
-
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setVaneModal(null)}>Cancel</button>
-              <button style={{ padding: '6px 16px', background: '#eab308', border: 'none', color: '#111', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveVane}>Save</button>
+              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => { setVaneModal(null); pendingVaneCantRef.current = null; }}>Cancel</button>
+              <button style={{ padding: '6px 16px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveVane}>Save</button>
             </div>
           </Modal>
         )}
@@ -955,47 +1002,20 @@ export default function EditorPage() {
             <input value={vaneFormLabel} onChange={e => setVaneFormLabel(e.target.value)} style={INP} autoFocus />
             <div style={ROW}>
               <div style={{ flex: 1 }}>
-                <label style={LBL}>CW Weight (kg/m)</label>
-                <input type="number" step="0.0001" value={vaneFormCwWeight} onChange={e => setVaneFormCwWeight(+e.target.value)} style={INP} />
+                <label style={LBL}>Qty Droppers <span style={{ color: '#64748b', fontSize: 10 }}>(0 = auto)</span></label>
+                <input type="number" min={0} value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>CW Tension (N)</label>
-                <input type="number" value={vaneFormCwTension} onChange={e => setVaneFormCwTension(+e.target.value)} style={INP} />
-              </div>
-            </div>
-            <div style={ROW}>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>SW Weight (kg/m)</label>
-                <input type="number" step="0.0001" value={vaneFormSwWeight} onChange={e => setVaneFormSwWeight(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>SW Tension (N)</label>
-                <input type="number" value={vaneFormSwTension} onChange={e => setVaneFormSwTension(+e.target.value)} style={INP} />
-              </div>
-            </div>
-            <div style={ROW}>
               <div style={{ flex: 1 }}>
                 <label style={LBL}>Initial Separation (mm)</label>
-                <input type="number" value={vaneFormInitSep} onChange={e => setVaneFormInitSep(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Qty Droppers</label>
-                <input type="number" value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
+                <input type="number" min={0} value={vaneFormInitialSep} onChange={e => setVaneFormInitialSep(+e.target.value)} style={INP} />
               </div>
             </div>
-            <div style={ROW}>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Dropper Weight (kg)</label>
-                <input type="number" step="0.0001" value={vaneFormDropWeight} onChange={e => setVaneFormDropWeight(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Step Size</label>
-                <input type="number" value={vaneFormStepSize} onChange={e => setVaneFormStepSize(+e.target.value)} style={INP} />
-              </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>
+              Inter-dropper spacing = (vane length − 2 × initial separation) ÷ (droppers − 1), calculated automatically.
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
               <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setEditVaneIdx(null)}>Cancel</button>
-              <button style={{ padding: '6px 16px', background: '#eab308', border: 'none', color: '#111', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveEditVane}>Save</button>
+              <button style={{ padding: '6px 16px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveEditVane}>Save</button>
             </div>
           </Modal>
         )}

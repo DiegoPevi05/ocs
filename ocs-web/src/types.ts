@@ -74,17 +74,41 @@ export interface CantileverData {
 }
 export interface VaneData {
   id?: string; label?: string;
+  // Parent cantilever indices (required — a vane always links exactly 2 cantilevers)
+  cantileverIdx1: number;
+  cantileverIdx2: number;
+  // Derived 2D positions (cached from cantilevers[idx].x2/z2 for rendering)
   x1: number; z1: number;
   x2: number; z2: number;
-  // Calculation params
-  cwWeight?: number;           // kg/m, default 0.0019
-  cwTension?: number;          // N, default 1600
-  swWeight?: number;           // kg/m, default 0.0024
-  swTension?: number;          // N, default 2000
-  initialSeparation?: number;  // mm, default 5000
-  qtyDroppers?: number;        // default 0
-  dropperWeight?: number;      // default 0.0006
-  stepSize?: number;           // default 0
+  // User-configurable
+  qtyDroppers?: number;         // default 0 (auto-calculated by vane length)
+  initialSeparation?: number;   // mm from each cantilever end to first/last dropper, default 5000
+  // Physical — inherited from cantilevers by default, can be overridden
+  cwWeight?: number;      // kg/m, default 0.0019
+  cwTension?: number;     // N, default 1600
+  swWeight?: number;      // kg/m, default 0.0024
+  swTension?: number;     // N, default 2000
+  dropperWeight?: number; // default 0.0006
+}
+
+// Vane calculation response from ocs-calculator
+export interface ApiVaneResponse {
+  status: string;
+  calculation_time_ms?: number;
+  _vaneIdx?: number;
+  vane?: {
+    lines: ApiLine[];
+    results: {
+      index: number;
+      dropper_length: number;
+      distance_eye_to_eye: number;
+      distance_cw: number;
+      distance_pole_dropper: number;
+      distance_dropper_dropper: number;
+      distance_cw_h: number;
+      dropper_inclination: number;
+    }[];
+  };
 }
 export interface SceneData {
   tracks: TrackData[];

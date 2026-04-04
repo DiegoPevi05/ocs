@@ -57,12 +57,19 @@ public class CalculationController {
     /**
      * Receives vane params from frontend via STOMP (/app/calculate/vane),
      * calls ocs-calculator, and broadcasts result to /topic/vane-result.
+     * _vaneIdx is passed through unchanged so the frontend can route the result.
      */
     @MessageMapping("/calculate/vane")
     public void calculateVane(@Payload Map<String, Object> request) {
+        final Object vaneIdx = request.get("_vaneIdx");
         calculatorClient.calculateVane(request)
                 .subscribe(
-                        result -> messaging.convertAndSend("/topic/vane-result", result),
+                        result -> {
+                            if (vaneIdx != null && result instanceof ObjectNode node) {
+                                node.set("_vaneIdx", mapper.valueToTree(vaneIdx));
+                            }
+                            messaging.convertAndSend("/topic/vane-result", result);
+                        },
                         error -> messaging.convertAndSend("/topic/vane-result", errorNode(error.getMessage()))
                 );
     }

@@ -42,6 +42,7 @@ export class ViewerEngine {
   private viewMode: ViewMode = '2D';
   public drawMode: DrawMode = 'none';
   public cantileverZigzag: number = 250;
+  public snapCantileverIdx: number = -1;
 
   // Grid (2D)
   private gridGroup: THREE.Group;
@@ -54,6 +55,8 @@ export class ViewerEngine {
 
   // API geometry
   private dataGroup: THREE.Group;
+  private vaneDataGroup: THREE.Group;
+  private vaneGroups: Map<string, THREE.Group> = new Map();
 
   // Dynamic UI geometry
   private dynamicGroup: THREE.Group;
@@ -101,12 +104,14 @@ export class ViewerEngine {
     this.cursorGroup = this.buildCursor();
     this.dataGroup = new THREE.Group();
     this.dataGroup.name = 'data';
+    this.vaneDataGroup = new THREE.Group();
+    this.vaneDataGroup.name = 'vaneData';
     this.dynamicGroup = new THREE.Group();
     this.dynamicGroup.name = 'dynamic';
     this.rubberbandGroup = new THREE.Group();
     this.rubberbandGroup.name = 'rubberband';
 
-    this.scene.add(this.gridGroup, this.dataGroup, this.dynamicGroup, this.rubberbandGroup, this.cursorGroup);
+    this.scene.add(this.gridGroup, this.dataGroup, this.vaneDataGroup, this.dynamicGroup, this.rubberbandGroup, this.cursorGroup);
 
     this.labelsContainer = document.createElement('div');
     this.labelsContainer.style.cssText = 'position: absolute; top: 0; left: 0; pointer-events: none; width: 100%; height: 100%; z-index: 5; overflow: hidden;';
@@ -505,10 +510,12 @@ export class ViewerEngine {
       const cantilevers = this.dynData.cantilevers || [];
       let closestPt: THREE.Vector2 | null = null;
       let minD = 5000;
-      cantilevers.forEach(c => {
+      let closestIdx = -1;
+      cantilevers.forEach((c: any, i: number) => {
         const d = Math.hypot(wx - c.x2, wz - c.z2);
-        if (d < minD) { minD = d; closestPt = new THREE.Vector2(c.x2, c.z2); }
+        if (d < minD) { minD = d; closestPt = new THREE.Vector2(c.x2, c.z2); closestIdx = i; }
       });
+      this.snapCantileverIdx = closestIdx;
       if (closestPt) return closestPt;
     }
 
@@ -791,7 +798,7 @@ export class ViewerEngine {
       const r = parseFloat(((this as any)._rInput as HTMLInputElement)?.value) || 0;
       const y = parseFloat(((this as any)._yInput as HTMLInputElement)?.value) || 0;
       this.container.dispatchEvent(new CustomEvent('viewer-click', {
-        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode }
+        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx }
       }));
     } else if (e.button === 0 && this.drawMode === 'none') {
       this.isSelecting = true;
@@ -1080,14 +1087,35 @@ export class ViewerEngine {
       cyl.layers.set(2);
       this.rubberbandGroup.add(cyl);
     } else if (this.drawMode === 'vane') {
-      const vanePts = this.dynData.vanePoints || [];
-      if (vanePts.length === 1) {
+      const cantilevers = this.dynData.cantilevers || [];
+      const firstCantIdx: number | null = this.dynData.vaneFirstCantIdx ?? null;
+
+      // Draw purple dot at every cantilever track endpoint
+      cantilevers.forEach((c: any, i: number) => {
+        const isFirst = firstCantIdx === i;
+        const isSnapped = this.snapCantileverIdx === i;
+        const color = isFirst ? 0xf0abfc : (isSnapped ? 0xd946ef : 0x9333ea);
+        const radius = isFirst || isSnapped ? 140 : 90;
+        const cgeo = new THREE.CircleGeometry(radius, 16);
+        cgeo.rotateX(-Math.PI / 2);
+        const cmat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+        const dot = new THREE.Mesh(cgeo, cmat);
+        dot.position.set(c.x2, 1, c.z2);
+        dot.layers.set(1);
+        this.rubberbandGroup.add(dot);
+      });
+
+      // If first cantilever selected, draw dashed line to cursor
+      if (firstCantIdx !== null && cantilevers[firstCantIdx]) {
+        const fc = cantilevers[firstCantIdx];
         const geo = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(vanePts[0].x, 0, vanePts[0].z),
+          new THREE.Vector3(fc.x2, 0, fc.z2),
           new THREE.Vector3(wx, 0, wz),
         ]);
-        const mat = new THREE.LineBasicMaterial({ color: 0xeab308 });
-        this.rubberbandGroup.add(new THREE.Line(geo, mat));
+        const mat = new THREE.LineDashedMaterial({ color: 0x9333ea, dashSize: 200, gapSize: 150 });
+        const line = new THREE.Line(geo, mat);
+        line.computeLineDistances();
+        this.rubberbandGroup.add(line);
       }
     } else if (this.drawMode === 'cantilever') {
       // Find nearest track foot + track segment direction for zigzag
@@ -1337,19 +1365,22 @@ export class ViewerEngine {
       data.vanes.forEach((v: any, vi: number) => {
         const isSelected = data.selectedVanes?.includes(vi) ?? false;
         const isHovered = this.hoveredState?.type === 'vane' && this.hoveredState?.index === vi;
-        const color = isSelected ? 0xfde047 : (isHovered ? 0xfef08a : 0xeab308);
+        const color = isSelected ? 0xf0abfc : (isHovered ? 0xd946ef : 0x9333ea);
         const geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(v.x1, 0, v.z1),
           new THREE.Vector3(v.x2, 0, v.z2)
         ]);
         const mat = new THREE.LineBasicMaterial({ color, linewidth: isSelected ? 3 : 2 });
-        this.dynamicGroup.add(new THREE.Line(geo, mat));
+        const vaneLine = new THREE.Line(geo, mat);
+        vaneLine.layers.set(1);
+        this.dynamicGroup.add(vaneLine);
         [{ x: v.x1, z: v.z1 }, { x: v.x2, z: v.z2 }].forEach(pt => {
           const cgeo = new THREE.CircleGeometry(isSelected ? 100 : 60, 12);
           cgeo.rotateX(-Math.PI / 2);
           const cmat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
           const mesh = new THREE.Mesh(cgeo, cmat);
           mesh.position.set(pt.x, 0, pt.z);
+          mesh.layers.set(1);
           this.dynamicGroup.add(mesh);
         });
       });
@@ -1573,6 +1604,56 @@ export class ViewerEngine {
     this.controls.update();
   }
 
+  public loadVaneLines(lines: ApiLine[], vaneKey: string): void {
+    // Remove existing group for this vane key
+    const existing = this.vaneGroups.get(vaneKey);
+    if (existing) {
+      existing.traverse((obj) => {
+        const o = obj as THREE.Line;
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          const m = o.material;
+          if (Array.isArray(m)) m.forEach((x) => x.dispose());
+          else (m as THREE.Material).dispose();
+        }
+      });
+      this.vaneDataGroup.remove(existing);
+    }
+
+    const group = new THREE.Group();
+    group.name = `vane_${vaneKey}`;
+    lines.forEach((apiLine) => {
+      // Override color to purple family for vane lines
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]),
+        new THREE.Vector3(apiLine.end[0], apiLine.end[1], -apiLine.end[2]),
+      ]);
+      const mat = new THREE.LineBasicMaterial({ color: rgbaToHex(apiLine.color) });
+      const line = new THREE.Line(geo, mat);
+      line.name = apiLine.name;
+      line.layers.set(2);
+      group.add(line);
+    });
+    this.vaneGroups.set(vaneKey, group);
+    this.vaneDataGroup.add(group);
+  }
+
+  public clearAllVaneLines(): void {
+    this.vaneGroups.forEach((group) => {
+      group.traverse((obj) => {
+        const o = obj as THREE.Line;
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          const m = o.material;
+          if (Array.isArray(m)) m.forEach((x) => x.dispose());
+          else (m as THREE.Material).dispose();
+        }
+      });
+      this.vaneDataGroup.remove(group);
+    });
+    this.vaneGroups.clear();
+  }
+
   public dispose(): void {
     if (this.raf) cancelAnimationFrame(this.raf);
 
@@ -1584,6 +1665,7 @@ export class ViewerEngine {
     this.container.removeEventListener('contextmenu', this._onCM);
 
     this.controls.dispose();
+    this.clearAllVaneLines();
 
     this.scene.traverse((obj) => {
       const o = obj as THREE.Line;

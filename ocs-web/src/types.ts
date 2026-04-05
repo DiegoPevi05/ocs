@@ -110,6 +110,39 @@ export interface ApiVaneResponse {
     }[];
   };
 }
+// ─── Nested calculation response from GET /api/locations/{id}/calculated ─────
+
+export interface CalcVaneEntry {
+  vaneIndex: number;
+  label?: string;
+  lines: ApiLine[];
+  results: NonNullable<ApiVaneResponse['vane']>['results'];
+}
+
+export interface CalcCantileverEntry {
+  cantileverIndex: number;
+  wireIndex: number;
+  label?: string;
+  configuration?: string;
+  lines: ApiLine[];
+  results: ApiResult[];
+  vanes: CalcVaneEntry[];
+}
+
+export interface CalcPoleEntry {
+  poleIndex: number;
+  label?: string;
+  x: number;
+  z: number;
+  cantilevers: CalcCantileverEntry[];
+}
+
+export interface CalcLocationResponse {
+  status: string;
+  location: Location;
+  poles: CalcPoleEntry[];
+}
+
 export interface SceneData {
   tracks: TrackData[];
   poles: PoleData[];

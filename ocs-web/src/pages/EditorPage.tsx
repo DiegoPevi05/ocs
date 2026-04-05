@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   MousePointer2, Minus, CircleDot, GitMerge, Link2,
-  Box, Square, RotateCcw, ArrowLeft, Save,
+  Box, Square, RotateCcw, ArrowLeft, Save, FileDown,
 } from 'lucide-react';
 import { Client as StompClient } from '@stomp/stompjs';
 import { ViewerEngine } from '../viewer/ViewerEngine';
@@ -10,7 +10,7 @@ import { api, parseSceneData } from '../lib/api';
 import { CantileverPanel } from '../components/CantileverPanel';
 import { VanePanel } from '../components/VanePanel';
 import { PolePanel } from '../components/PolePanel';
-import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse, PoleData } from '../types';
+import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse, PoleData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -121,6 +121,7 @@ export default function EditorPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>('2D');
   const [drawMode, setDrawMode] = useState<DrawMode>('none');
@@ -173,6 +174,10 @@ export default function EditorPage() {
   const pendingVaneCantRef = useRef<{ cantileverIdx1: number; cantileverIdx2: number } | null>(null);
   const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const calcResultsRef = useRef<ApiResponse[]>([]);
+  // Per-index caches populated from the initial /calculated fetch
+  const calcByCantiIdx = useRef<Map<number, CalcCantileverEntry>>(new Map());
+  const calcByVaneIdx  = useRef<Map<number, CalcVaneEntry>>(new Map());
+  const hasInitialCalc = useRef(false);
   const calcExpectedRef = useRef<number>(0);
 
   // Stable refs
@@ -207,50 +212,69 @@ export default function EditorPage() {
     return () => { engine.dispose(); engineRef.current = null; };
   }, []);
 
-  // Load location scene data
+  // Load location scene + pre-calculated data
   useEffect(() => {
     if (!locationId) return;
+
+    const applyScene = (loc: Location) => {
+      setLocation(loc);
+      const scene = parseSceneData(loc);
+      if (scene) {
+        setCompletedTracks(scene.tracks.map(t => t.points.map(p => ({ ...p, label: t.label }))));
+        setPoles(scene.poles);
+        setCantilevers(scene.cantilevers);
+        setVanes(scene.vanes);
+      }
+    };
+
     fetch(`/api/locations/${locationId}/calculated`)
-      .then(res => res.json())
-      .then(res => {
-        if (res.status === 'success') {
-          const loc = res.location;
-          setLocation(loc);
-          const scene = parseSceneData(loc);
-          if (scene) {
-            setCompletedTracks(scene.tracks.map((t: any) => t.points.map((p: any) => ({ ...p, label: t.label }))));
-            setPoles(scene.poles);
-            setCantilevers(scene.cantilevers);
-            setVanes(scene.vanes);
-          }
-          if (res.calculations && res.calculations.status === 'success') {
-            calcResultsRef.current = [res.calculations];
-            engineRef.current?.clearApiData();
-            engineRef.current?.addApiData(res.calculations);
-          }
-        } else {
-          api.locations.get(locationId).then(loc => {
-            setLocation(loc);
-            const scene = parseSceneData(loc);
-            if (scene) {
-              setCompletedTracks(scene.tracks.map(t => t.points.map(p => ({ ...p, label: t.label }))));
-              setPoles(scene.poles);
-              setCantilevers(scene.cantilevers);
-              setVanes(scene.vanes);
-            }
-          }).catch(() => {/* offline */ });
+      .then(r => r.json())
+      .then((res: CalcLocationResponse) => {
+        if (res.status !== 'success') {
+          api.locations.get(locationId).then(applyScene).catch(() => {});
+          return;
         }
-      }).catch(() => {
-        api.locations.get(locationId).then(loc => {
-          setLocation(loc);
-          const scene = parseSceneData(loc);
-          if (scene) {
-            setCompletedTracks(scene.tracks.map(t => t.points.map(p => ({ ...p, label: t.label }))));
-            setPoles(scene.poles);
-            setCantilevers(scene.cantilevers);
-            setVanes(scene.vanes);
+
+        applyScene(res.location);
+
+        if (res.poles && res.poles.length > 0) {
+          // Clear viewer and caches
+          engineRef.current?.clearApiData();
+          engineRef.current?.clearAllVaneLines();
+          calcByCantiIdx.current.clear();
+          calcByVaneIdx.current.clear();
+          calcResultsRef.current = [];
+          const seenVanes = new Set<number>();
+
+          for (const pole of res.poles) {
+            for (const canti of pole.cantilevers) {
+              // Cache primary wire (wireIndex 0) results for the edit panel
+              if (canti.wireIndex === 0) {
+                calcByCantiIdx.current.set(canti.cantileverIndex, canti);
+              }
+              // Reconstruct ApiResponse-shaped object so the viewer can render lines
+              const synthetic: ApiResponse = {
+                status: 'success', calculation_time_ms: 0,
+                poles: [{ lines: [], cantilevers: [{ index: canti.wireIndex, lines: canti.lines, results: canti.results }] }],
+              };
+              engineRef.current?.addApiData(synthetic);
+
+              // Load vane lines (deduplicated) and cache vane results
+              for (const vane of canti.vanes) {
+                calcByVaneIdx.current.set(vane.vaneIndex, vane);
+                if (!seenVanes.has(vane.vaneIndex)) {
+                  seenVanes.add(vane.vaneIndex);
+                  if (vane.lines.length > 0)
+                    engineRef.current?.loadVaneLines(vane.lines, vane.vaneIndex.toString());
+                }
+              }
+            }
           }
-        }).catch(() => {/* offline */ });
+          hasInitialCalc.current = true;
+        }
+      })
+      .catch(() => {
+        api.locations.get(locationId).then(applyScene).catch(() => {});
       });
   }, [locationId]);
 
@@ -268,45 +292,78 @@ export default function EditorPage() {
           const data: ApiResponse = JSON.parse(msg.body);
           if (data.status === 'success') {
             calcResultsRef.current.push(data);
-            // Re-render all accumulated pole results together
             engineRef.current?.clearApiData();
             calcResultsRef.current.forEach(r => engineRef.current?.addApiData(r));
-            // Capture results for the cantilever currently being edited
-            const editIdx = editCantileverIdxRef.current;
-            if (editIdx !== null) {
-              // Find results: scan all poles for a cantilever whose results list is non-empty
-              // We store results from the first cantilever found matching the latest batch
-              for (const pole of data.poles) {
-                for (const cant of pole.cantilevers) {
-                  if (cant.results && cant.results.length > 0) {
-                    setLastCantResults(cant.results);
-                    break;
-                  }
+
+            // Update per-cantilever cache so the edit panel shows fresh results.
+            // The batch response poles[] follow the same order as the sent cantilevers[].
+            // Reconstruct the cantileverIndex mapping using the current cantilevers state.
+            const curCantis = cantileversRef.current;
+            const curPoles  = polesRef.current;
+            let outIdx = 0;
+            for (let ci = 0; ci < curCantis.length; ci++) {
+              const c = curCantis[ci];
+              const matchPole = curPoles.find(p => Math.hypot(p.x - c.x1, p.z - c.z1) < 500);
+              const cantQty = matchPole?.cantileversQuantity ?? 1;
+              if (outIdx < data.poles.length) {
+                const bp = data.poles[outIdx];
+                const bc = bp.cantilevers[0];
+                if (bc) {
+                  const existing = calcByCantiIdx.current.get(ci);
+                  calcByCantiIdx.current.set(ci, {
+                    cantileverIndex: ci, wireIndex: 0,
+                    label: existing?.label, configuration: c.configuration,
+                    lines: [...(bp.lines ?? []), ...(bc.lines ?? [])],
+                    results: bc.results ?? [],
+                    vanes: existing?.vanes ?? [],
+                  });
                 }
               }
+              outIdx += cantQty;
+            }
+
+            // Update panel if a cantilever is currently open
+            const editIdx = editCantileverIdxRef.current;
+            if (editIdx !== null) {
+              const cached = calcByCantiIdx.current.get(editIdx);
+              if (cached) setLastCantResults(cached.results);
             }
           }
         } catch { /* ignore parse errors */ }
       });
+
       // Subscribe to vane calculation results
       client.subscribe('/topic/vane-result', msg => {
         try {
           const data = JSON.parse(msg.body);
           if (data.status === 'success' && data.vane && data._vaneIdx !== undefined) {
-            engineRef.current?.loadVaneLines(data.vane.lines || [], data._vaneIdx.toString());
-            // Capture dropper results whenever we are in vane edit mode.
-            // We don't match on _vaneIdx because handleCalculateVane sends a
-            // single-element array (index 0), not the real editVaneIdx.
-            if (editVaneIdxRef.current !== null && data.vane.results) {
-              setLastVaneResults(data.vane.results);
+            const vIdx: number = data._vaneIdx;
+            engineRef.current?.loadVaneLines(data.vane.lines || [], vIdx.toString());
+
+            // Update vane cache
+            const vScene = vanesRef.current[vIdx];
+            if (vScene !== undefined) {
+              const existing = calcByVaneIdx.current.get(vIdx);
+              calcByVaneIdx.current.set(vIdx, {
+                vaneIndex: vIdx, label: vScene.label,
+                lines: data.vane.lines ?? [],
+                results: data.vane.results ?? existing?.results ?? [],
+              });
+            }
+
+            // Update panel if this vane is open
+            if (editVaneIdxRef.current !== null) {
+              const cached = calcByVaneIdx.current.get(editVaneIdxRef.current);
+              if (cached) setLastVaneResults(cached.results);
             }
           }
         } catch { /* ignore */ }
       });
-      // STOMP connected — recalculate with whatever is already loaded.
-      // triggerCalculation checks connected state at call time, so we need
-      // to call it here after the connection is established.
-      triggerCalculation(cantileversRef.current);
+
+      // Only auto-recalculate on connect if we have no pre-loaded data
+      if (!hasInitialCalc.current) {
+        triggerCalculation(cantileversRef.current);
+      }
     };
 
     client.activate();
@@ -689,7 +746,8 @@ export default function EditorPage() {
 
   const openEditCantilever = (idx: number) => {
     if (!cantilevers[idx]) return;
-    setLastCantResults(null);
+    const cached = calcByCantiIdx.current.get(idx);
+    setLastCantResults(cached?.results ?? null);
     editCantileverIdxRef.current = idx;
     setEditCantileverIdx(idx);
     const c = cantilevers[idx];
@@ -772,7 +830,8 @@ export default function EditorPage() {
     setVaneFormLabel(v.label ?? '');
     setVaneFormDroppers(v.qtyDroppers ?? 0);
     setVaneFormInitialSep(v.initialSeparation ?? 5000);
-    setLastVaneResults(null);
+    const cachedVane = calcByVaneIdx.current.get(idx);
+    setLastVaneResults(cachedVane?.results ?? null);
     editVaneIdxRef.current = idx;
     setEditVaneIdx(idx);
     // Switch to 3D front-elevation view looking perpendicular to the vane
@@ -834,6 +893,23 @@ export default function EditorPage() {
           {locationId && (
             <button onClick={() => saveScene()} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: saving ? '#1e293b' : '#3b82f6', border: '1px solid #3b82f6', color: '#fff', borderRadius: 6, cursor: saving ? 'default' : 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
               <Save size={14} /> {saving ? 'Saving…' : 'Save'}
+            </button>
+          )}
+          {locationId && (
+            <button
+              disabled={downloading}
+              onClick={async () => {
+                setDownloading(true);
+                try {
+                  const name = (location?.name ?? 'report').replace(/[^a-zA-Z0-9_-]/g, '_');
+                  await api.locations.downloadReport(locationId, `ocs-report-${name}.pdf`);
+                } finally {
+                  setDownloading(false);
+                }
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: downloading ? '#1e293b' : '#166534', border: '1px solid #166534', color: '#fff', borderRadius: 6, cursor: downloading ? 'default' : 'pointer', fontSize: '0.8rem', fontWeight: 500 }}
+            >
+              <FileDown size={14} /> {downloading ? 'Generating…' : 'Report'}
             </button>
           )}
           <button className={`view-toggle ${viewMode === '3D' ? 'view-toggle--3d' : ''}`} onClick={toggleView}>

@@ -21,6 +21,7 @@
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/projects/ProjectMembership.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/projects/ProjectMembershipRepository.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/projects/ProjectRepository.java
+/home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/report/ReportService.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/shared/BaseEntity.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/shared/GlobalExceptionHandler.java
 /home/fares00/documents/ocs/ocs-api/src/main/java/com/ocs/api/tracks/Track.java

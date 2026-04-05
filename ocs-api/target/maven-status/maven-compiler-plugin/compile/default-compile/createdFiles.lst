@@ -35,6 +35,7 @@ com/ocs/api/tracks/TrackRepository.class
 com/ocs/api/locations/LocationRepository.class
 com/ocs/api/auth/TokenResponse.class
 com/ocs/api/users/User.class
+com/ocs/api/report/ReportService.class
 com/ocs/api/auth/TokenResponse$TokenResponseBuilder.class
 com/ocs/api/locations/Location$LocationBuilder.class
 com/ocs/api/calculator/CalculationController.class

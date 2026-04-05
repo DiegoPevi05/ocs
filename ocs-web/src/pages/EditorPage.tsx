@@ -8,6 +8,7 @@ import { Client as StompClient } from '@stomp/stompjs';
 import { ViewerEngine } from '../viewer/ViewerEngine';
 import { api, parseSceneData } from '../lib/api';
 import { CantileverPanel } from '../components/CantileverPanel';
+import { VanePanel } from '../components/VanePanel';
 import { PolePanel } from '../components/PolePanel';
 import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse, PoleData } from '../types';
 
@@ -160,6 +161,12 @@ export default function EditorPage() {
   const [vaneFormDroppers, setVaneFormDroppers] = useState(0);
   const [vaneFormInitialSep, setVaneFormInitialSep] = useState(5000);
 
+  // Results overlay
+  const [lastCantResults, setLastCantResults] = useState<{ name: string; length: number; cut_length: number; diameter: number; thickness: number }[] | null>(null);
+  const [lastVaneResults, setLastVaneResults] = useState<{ index: number; dropper_length: number; distance_eye_to_eye: number; distance_cw: number; distance_pole_dropper: number; distance_dropper_dropper: number; dropper_inclination: number }[] | null>(null);
+  const editCantileverIdxRef = useRef<number | null>(null);
+  const editVaneIdxRef = useRef<number | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
   const stompRef = useRef<StompClient | null>(null);
@@ -264,6 +271,20 @@ export default function EditorPage() {
             // Re-render all accumulated pole results together
             engineRef.current?.clearApiData();
             calcResultsRef.current.forEach(r => engineRef.current?.addApiData(r));
+            // Capture results for the cantilever currently being edited
+            const editIdx = editCantileverIdxRef.current;
+            if (editIdx !== null) {
+              // Find results: scan all poles for a cantilever whose results list is non-empty
+              // We store results from the first cantilever found matching the latest batch
+              for (const pole of data.poles) {
+                for (const cant of pole.cantilevers) {
+                  if (cant.results && cant.results.length > 0) {
+                    setLastCantResults(cant.results);
+                    break;
+                  }
+                }
+              }
+            }
           }
         } catch { /* ignore parse errors */ }
       });
@@ -273,6 +294,12 @@ export default function EditorPage() {
           const data = JSON.parse(msg.body);
           if (data.status === 'success' && data.vane && data._vaneIdx !== undefined) {
             engineRef.current?.loadVaneLines(data.vane.lines || [], data._vaneIdx.toString());
+            // Capture dropper results whenever we are in vane edit mode.
+            // We don't match on _vaneIdx because handleCalculateVane sends a
+            // single-element array (index 0), not the real editVaneIdx.
+            if (editVaneIdxRef.current !== null && data.vane.results) {
+              setLastVaneResults(data.vane.results);
+            }
           }
         } catch { /* ignore */ }
       });
@@ -662,6 +689,8 @@ export default function EditorPage() {
 
   const openEditCantilever = (idx: number) => {
     if (!cantilevers[idx]) return;
+    setLastCantResults(null);
+    editCantileverIdxRef.current = idx;
     setEditCantileverIdx(idx);
     const c = cantilevers[idx];
     if (engineRef.current) {
@@ -743,25 +772,45 @@ export default function EditorPage() {
     setVaneFormLabel(v.label ?? '');
     setVaneFormDroppers(v.qtyDroppers ?? 0);
     setVaneFormInitialSep(v.initialSeparation ?? 5000);
+    setLastVaneResults(null);
+    editVaneIdxRef.current = idx;
     setEditVaneIdx(idx);
+    // Switch to 3D front-elevation view looking perpendicular to the vane
+    const c1 = cantilevers[v.cantileverIdx1];
+    const c2 = cantilevers[v.cantileverIdx2];
+    const cwHeight = ((c1?.contactWireHeight ?? 5400) + (c2?.contactWireHeight ?? 5400)) / 2;
+    setViewMode('3D');
+    setDrawMode('none');
+    engineRef.current?.setDrawMode('none');
+    engineRef.current?.focusVane(v, cwHeight);
   };
 
-  const saveEditVane = () => {
+  const handleCalculateVane = (updatedVane: VaneData) => {
     if (editVaneIdx === null) return;
-    if (!vaneFormLabel.trim()) { alert('Label is required'); return; }
+    const tempVane = { ...updatedVane };
+    triggerVaneCalculation([tempVane], cantilevers);
+  };
+
+  const saveEditVane = (updatedVane?: VaneData) => {
+    if (editVaneIdx === null) return;
+    const label = updatedVane?.label ?? vaneFormLabel;
+    if (!label.trim()) { alert('Label is required'); return; }
     setVanes(prev => {
       const next = [...prev];
-      next[editVaneIdx] = {
-        ...next[editVaneIdx], label: vaneFormLabel.trim(),
-        qtyDroppers: vaneFormDroppers,
-        initialSeparation: vaneFormInitialSep,
-      };
+      next[editVaneIdx] = updatedVane
+        ? { ...next[editVaneIdx], ...updatedVane }
+        : { ...next[editVaneIdx], label: vaneFormLabel.trim(), qtyDroppers: vaneFormDroppers, initialSeparation: vaneFormInitialSep };
       saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, next);
       triggerVaneCalculation([next[editVaneIdx]], cantileversRef.current);
       return next;
     });
+    editVaneIdxRef.current = null;
     setEditVaneIdx(null);
     setSelectedVanes([]);
+    setLastVaneResults(null);
+    setViewMode('2D');
+    engineRef.current?.setViewMode('2D');
+    engineRef.current?.resetCamera();
   };
 
   const totalSelected = selectedTracks.length + selectedPoles.length + selectedCantilevers.length + selectedVanes.length;
@@ -878,6 +927,110 @@ export default function EditorPage() {
               </label>
             </div>
           </div>
+
+          {/* ── Results overlay: bottom-left of canvas, fade-in when editing ── */}
+          {(() => {
+            const visible = editCantileverIdx !== null || editVaneIdx !== null;
+            const hasResults = lastCantResults !== null || lastVaneResults !== null;
+            if (!visible) return null;
+            return (
+              <div style={{
+                position: 'absolute', bottom: 20, left: 20,
+                maxWidth: 420, zIndex: 100,
+                background: 'rgba(0,0,0,0.58)',
+                border: '1px solid rgba(255,255,255,0.09)',
+                borderRadius: 8,
+                color: '#e2e8f0',
+                fontFamily: 'monospace',
+                fontSize: 11,
+                backdropFilter: 'blur(6px)',
+                animation: 'resultsOverlayIn 0.3s ease-out',
+                overflow: 'hidden',
+              }}>
+                <style>{`
+                  @keyframes resultsOverlayIn {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to   { opacity: 1; transform: translateY(0); }
+                  }
+                  .results-tbl { border-collapse: collapse; width: 100%; }
+                  .results-tbl th { color: #64748b; font-weight: 600; padding: 4px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+                  .results-tbl td { padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }
+                  .results-tbl tr:last-child td { border-bottom: none; }
+                  .results-tbl tr:hover td { background: rgba(255,255,255,0.03); }
+                `}</style>
+
+                {/* Header */}
+                <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{
+                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                    background: editCantileverIdx !== null ? '#f59e0b' : '#9333ea',
+                  }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {editCantileverIdx !== null ? 'Cantilever Results' : 'Vane Dropper Results'}
+                  </span>
+                  {!hasResults && <span style={{ marginLeft: 'auto', color: '#475569', fontStyle: 'italic', fontSize: 10 }}>awaiting calculation…</span>}
+                </div>
+
+                {/* Cantilever parts table */}
+                {lastCantResults && lastCantResults.length > 0 && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="results-tbl">
+                      <thead>
+                        <tr>
+                          <th>Part</th>
+                          <th>Length (mm)</th>
+                          <th>Cut (mm)</th>
+                          <th>∅ (mm)</th>
+                          <th>Thick (mm)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lastCantResults.map((r, i) => (
+                          <tr key={i}>
+                            <td style={{ color: '#f59e0b' }}>{r.name}</td>
+                            <td>{r.length.toFixed(1)}</td>
+                            <td>{r.cut_length.toFixed(1)}</td>
+                            <td>{r.diameter.toFixed(1)}</td>
+                            <td>{r.thickness.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Vane dropper table */}
+                {lastVaneResults && lastVaneResults.length > 0 && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="results-tbl">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Dropper (mm)</th>
+                          <th>Eye-Eye (mm)</th>
+                          <th>CW Dist (mm)</th>
+                          <th>Pole Dist (mm)</th>
+                          <th>Tilt (°)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lastVaneResults.map((r, i) => (
+                          <tr key={i}>
+                            <td style={{ color: '#9333ea' }}>{r.index ?? i + 1}</td>
+                            <td>{r.dropper_length.toFixed(1)}</td>
+                            <td>{r.distance_eye_to_eye.toFixed(1)}</td>
+                            <td>{r.distance_cw.toFixed(1)}</td>
+                            <td>{r.distance_pole_dropper.toFixed(1)}</td>
+                            <td>{r.dropper_inclination.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </main>
 
         {/* ── Modals ── */}
@@ -986,7 +1139,9 @@ export default function EditorPage() {
             onSave={handleSaveFromPanel}
             onCalculate={handleCalculateFromPanel}
             onClose={() => {
+              editCantileverIdxRef.current = null;
               setEditCantileverIdx(null);
+              setLastCantResults(null);
               triggerCalculation(cantilevers);
               setViewMode('2D');
               engineRef.current?.setViewMode('2D');
@@ -995,29 +1150,22 @@ export default function EditorPage() {
           />
         )}
 
-        {/* ── Edit: Vane ── */}
-        {editVaneIdx !== null && (
-          <Modal title={`Edit Vane: ${vaneFormLabel}`} onClose={() => setEditVaneIdx(null)}>
-            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
-            <input value={vaneFormLabel} onChange={e => setVaneFormLabel(e.target.value)} style={INP} autoFocus />
-            <div style={ROW}>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Qty Droppers <span style={{ color: '#64748b', fontSize: 10 }}>(0 = auto)</span></label>
-                <input type="number" min={0} value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={LBL}>Initial Separation (mm)</label>
-                <input type="number" min={0} value={vaneFormInitialSep} onChange={e => setVaneFormInitialSep(+e.target.value)} style={INP} />
-              </div>
-            </div>
-            <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>
-              Inter-dropper spacing = (vane length − 2 × initial separation) ÷ (droppers − 1), calculated automatically.
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setEditVaneIdx(null)}>Cancel</button>
-              <button style={{ padding: '6px 16px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveEditVane}>Save</button>
-            </div>
-          </Modal>
+        {/* ── Edit: Vane (slide-in panel) ── */}
+        {editVaneIdx !== null && vanes[editVaneIdx] && (
+          <VanePanel
+            vane={vanes[editVaneIdx]}
+            onSave={saveEditVane}
+            onCalculate={handleCalculateVane}
+            onClose={() => {
+              editVaneIdxRef.current = null;
+              setEditVaneIdx(null);
+              setLastVaneResults(null);
+              setSelectedVanes([]);
+              setViewMode('2D');
+              engineRef.current?.setViewMode('2D');
+              engineRef.current?.resetCamera();
+            }}
+          />
         )}
       </div>
     </div>

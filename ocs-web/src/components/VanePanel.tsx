@@ -1,0 +1,204 @@
+import { useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import type { VaneData } from '../types';
+
+// ─── Shared style tokens ──────────────────────────────────────────────────────
+
+const INPUT: CSSProperties = {
+    width: '100%', padding: '6px 10px',
+    background: '#0a0e1a', border: '1px solid #1e2d45',
+    borderRadius: 4, color: '#e2e8f0', fontSize: 12,
+    outline: 'none',
+};
+
+const LABEL: CSSProperties = {
+    display: 'block', fontSize: 10,
+    color: '#64748b', textTransform: 'uppercase',
+    letterSpacing: '0.06em', marginBottom: 4,
+};
+
+const HINT: CSSProperties = {
+    fontSize: 10, color: '#475569', marginTop: 3,
+};
+
+// ─── Small layout helpers ─────────────────────────────────────────────────────
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+    return (
+        <div style={{ flex: 1, minWidth: 0 }}>
+            <label style={LABEL}>{label}</label>
+            {children}
+            {hint && <div style={HINT}>{hint}</div>}
+        </div>
+    );
+}
+
+function Row({ children }: { children: ReactNode }) {
+    return <div style={{ display: 'flex', gap: 10 }}>{children}</div>;
+}
+
+function Divider({ label }: { label: string }) {
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+            <div style={{ flex: 1, height: 1, background: '#1e2d45' }} />
+            <span style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{label}</span>
+            <div style={{ flex: 1, height: 1, background: '#1e2d45' }} />
+        </div>
+    );
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+interface Props {
+    vane: VaneData;
+    onSave: (updated: VaneData) => void;
+    onCalculate?: (updated: VaneData) => void;
+    onClose: () => void;
+}
+
+export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
+    const [form, setForm] = useState<VaneData>({ ...vane });
+
+    const set = <K extends keyof VaneData>(key: K, val: VaneData[K]) =>
+        setForm(f => ({ ...f, [key]: val }));
+
+    return (
+        <>
+            {/* ── Panel ── */}
+            <div style={{
+                position: 'fixed', top: 0, right: 0, bottom: 0,
+                width: 'clamp(280px, 25vw, 420px)',
+                background: '#111827',
+                borderLeft: '1px solid #1e2d45',
+                zIndex: 201,
+                display: 'flex', flexDirection: 'column',
+                animation: 'cantileverPanelIn 0.22s ease-out',
+                boxShadow: '-8px 0 32px rgba(0,0,0,0.5)',
+            }}>
+
+                {/* ── Header ── */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '14px 18px',
+                    borderBottom: '1px solid #1e2d45',
+                    background: '#1c2539',
+                    flexShrink: 0,
+                }}>
+                    <div>
+                        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vane</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', marginTop: 2 }}>
+                            {form.label || <span style={{ color: '#475569', fontStyle: 'italic' }}>unnamed</span>}
+                        </div>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: '0 4px' }}
+                    >×</button>
+                </div>
+
+                {/* ── Scrollable body ── */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                    {/* Label */}
+                    <Field label="Label">
+                        <input
+                            value={form.label ?? ''}
+                            onChange={e => set('label', e.target.value)}
+                            style={INPUT}
+                            autoFocus
+                        />
+                    </Field>
+
+                    <Divider label="Dropper Configuration" />
+
+                    <Row>
+                        <Field label="Qty Droppers" hint="0 = auto-calculated from vane length">
+                            <input type="number" min={0} value={form.qtyDroppers ?? 0}
+                                onChange={e => set('qtyDroppers', +e.target.value)} style={INPUT} />
+                        </Field>
+                        <Field label="Initial Separation (mm)" hint="Distance from each end to first/last dropper">
+                            <input type="number" min={0} value={form.initialSeparation ?? 5000}
+                                onChange={e => set('initialSeparation', +e.target.value)} style={INPUT} />
+                        </Field>
+                    </Row>
+
+                    <Divider label="Wire Properties" />
+
+                    <Row>
+                        <Field label="CW Weight (kg/m)">
+                            <input type="number" step={0.0001} value={form.cwWeight ?? 0.0019}
+                                onChange={e => set('cwWeight', +e.target.value)} style={INPUT} />
+                        </Field>
+                        <Field label="CW Tension (N)">
+                            <input type="number" value={form.cwTension ?? 1600}
+                                onChange={e => set('cwTension', +e.target.value)} style={INPUT} />
+                        </Field>
+                    </Row>
+
+                    <Row>
+                        <Field label="SW Weight (kg/m)">
+                            <input type="number" step={0.0001} value={form.swWeight ?? 0.0024}
+                                onChange={e => set('swWeight', +e.target.value)} style={INPUT} />
+                        </Field>
+                        <Field label="SW Tension (N)">
+                            <input type="number" value={form.swTension ?? 2000}
+                                onChange={e => set('swTension', +e.target.value)} style={INPUT} />
+                        </Field>
+                    </Row>
+
+                    <Field label="Dropper Weight (kg/m)" hint="Weight per unit length of each dropper">
+                        <input type="number" step={0.0001} value={form.dropperWeight ?? 0.0006}
+                            onChange={e => set('dropperWeight', +e.target.value)} style={INPUT} />
+                    </Field>
+
+                </div>
+
+                {/* ── Footer ── */}
+                <div style={{
+                    padding: '12px 18px',
+                    borderTop: '1px solid #1e2d45',
+                    display: 'flex', gap: 8, justifyContent: 'flex-end',
+                    background: '#1c2539',
+                    flexShrink: 0,
+                }}>
+                    <button
+                        onClick={onClose}
+                        style={{
+                            padding: '7px 18px', background: 'none',
+                            border: '1px solid #1e2d45', color: '#94a3b8',
+                            borderRadius: 4, cursor: 'pointer', fontSize: 13,
+                        }}
+                    >Cancel</button>
+
+                    {onCalculate && (
+                        <button
+                            onClick={() => onCalculate(form)}
+                            style={{
+                                padding: '7px 18px', background: '#eab308',
+                                border: 'none', color: '#111',
+                                borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                            }}
+                        >Calculate</button>
+                    )}
+
+                    <button
+                        onClick={() => onSave(form)}
+                        style={{
+                            padding: '7px 18px', background: '#9333ea',
+                            border: 'none', color: '#fff',
+                            borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                        }}
+                    >Save</button>
+                </div>
+            </div>
+
+            {/* Reuse the same keyframe from CantileverPanel */}
+            <style>{`
+        @keyframes cantileverPanelIn {
+          from { transform: translateX(100%); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
+        }
+      `}</style>
+        </>
+    );
+}

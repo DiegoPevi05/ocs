@@ -194,23 +194,28 @@ void VaneBuilder::generateReactions() {
 
 void VaneBuilder::generateContactWireArrow() {
     if (!arrow) return;
-    
+
     double maximumArrow = (arrow_length > 0) ? arrow_length : (0.068 / 60.0) * vane_length;
     if (dropper_indexes.empty()) return;
-    
-    int x1 = dropper_indexes.front();
-    int x2 = dropper_indexes.back();
-    double x_v = (x1 + x2) / 2.0;
-    double y_v = maximumArrow;
-    
-    if (x1 == x_v) return;
-    double a = -y_v / std::pow(x1 - x_v, 2);
+
+    // Parabola parameterised by distance along the vane (not by array index),
+    // so the shape is correct regardless of how many rendering-grid points were inserted.
+    double d_start = initial_separation;
+    double d_end   = vane_length - initial_separation;
+    if (d_start >= d_end) return;
+
+    double d_mid    = (d_start + d_end) * 0.5;
+    double half_span = d_mid - d_start;
+    if (half_span == 0.0) return;
+
+    double a = -maximumArrow / (half_span * half_span);
 
     for (size_t x = 0; x < diffElementsPositions.size(); x++) {
-        if ((int)x >= x1 && (int)x <= x2) {
-            diffElementsArrow[x] = a * std::pow((int)x - x_v, 2) + y_v;
+        double dist = getDistance3D(startPoint, diffElementsPositions[x]);
+        if (dist >= d_start && dist <= d_end) {
+            diffElementsArrow[x] = a * std::pow(dist - d_mid, 2) + maximumArrow;
         } else {
-            diffElementsArrow[x] = 0;
+            diffElementsArrow[x] = 0.0;
         }
     }
 }
@@ -223,26 +228,33 @@ void VaneBuilder::generateHeights() {
             diffHeights[x] = getSystemHeightB();
         } else {
             double elem_len = getDistance3D(startPoint, diffElementsPositions[x]);
-            bool left_side = elem_len < vane_length / 2.0;
 
-            if (left_side) {
-                double support_wire_arrow = 0;
-                if (reaction_ax != 0) {
-                    support_wire_arrow = (elem_len * reaction_ay - getRelDiffMoments(x) - (sw_weight * elem_len * elem_len / 2.0)) / reaction_ax;
-                }
-                
-                if (h < 0) diffHeights[x] = getSystemHeightA() - support_wire_arrow + h;
-                else diffHeights[x] = getSystemHeightA() - support_wire_arrow;
-
-            } else {
-                double support_wire_arrow = 0;
-                if (reaction_bx != 0) {
-                    support_wire_arrow = (elem_len * reaction_by - getRelDiffMoments(x) - (sw_weight * elem_len * elem_len / 2.0)) / reaction_bx;
-                }
-                
-                if (h > 0) diffHeights[x] = getSystemHeightB() - support_wire_arrow - h;
-                else diffHeights[x] = getSystemHeightB() - support_wire_arrow;
+            // Correct cable sag formula, valid for all x with no left/right split:
+            //
+            //   diffHeights(x) = baseline(x) − M_beam(x)/H
+            //
+            // where M_beam(x) = R_A_beam·x − getRelDiffMoments(x) − p·x²/2
+            // and   R_A_beam  = MB/L  (pure-beam reaction at A, from moment
+            //                          equilibrium about B, independent of geometry).
+            //
+            // MB = reaction_by·L + h·reaction_ax  (from generateReactions), so:
+            //   R_A_beam = reaction_by + h·H/L
+            //
+            // This guarantees M_beam(0)=0 and M_beam(L)=0, giving exactly heightA
+            // at x=0 and heightB at x=L with a smooth parabola in between.
+            double R_A_beam = reaction_by + (vane_length > 0.0 ? h * reaction_ax / vane_length : 0.0);
+            double support_wire_arrow = 0;
+            if (reaction_ax != 0) {
+                support_wire_arrow = (R_A_beam * elem_len
+                                      - getRelDiffMoments(x)
+                                      - sw_weight * elem_len * elem_len / 2.0)
+                                     / reaction_ax;
             }
+
+            // Linearly interpolated chord: correct for asymmetric spans (heightA ≠ heightB).
+            double t = (vane_length > 0) ? elem_len / vane_length : 0.0;
+            double baseline = getSystemHeightA() * (1.0 - t) + getSystemHeightB() * t;
+            diffHeights[x] = baseline - support_wire_arrow;
 
             auto it = std::find(dropper_indexes.begin(), dropper_indexes.end(), x);
             if (it != dropper_indexes.end()) {

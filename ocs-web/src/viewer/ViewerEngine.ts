@@ -1478,10 +1478,43 @@ export class ViewerEngine {
     }
 
     if (this.dynData.vanes) {
-      this.dynData.vanes.forEach(v => {
+      this.dynData.vanes.forEach((v, vi) => {
         if (v.label) {
-          const mx = (v.x1 + v.x2) / 2, mz = (v.z1 + v.z2) / 2;
-          addLbl(v.label, new THREE.Vector3(mx, 120, mz));
+          let labelPos: THREE.Vector3 | null = null;
+
+          // In 3D view, collect all ContactWire vertices from the matching vane
+          // group (keyed by vane index, matching _vaneIdx used in loadVaneLines)
+          // and place the label at the bounding-box centre of the full wire.
+          if (this.viewMode === '3D') {
+            const group = this.vaneGroups.get(vi.toString());
+            if (group) {
+              const bbox = new THREE.Box3();
+              group.traverse((obj) => {
+                const line = obj as THREE.Line;
+                if (line.isLine && line.name === 'ContactWire') {
+                  const pos = line.geometry.attributes.position;
+                  if (pos) {
+                    for (let vi = 0; vi < pos.count; vi++) {
+                      bbox.expandByPoint(new THREE.Vector3(pos.getX(vi), pos.getY(vi), pos.getZ(vi)));
+                    }
+                  }
+                }
+              });
+              if (!bbox.isEmpty()) {
+                const center = new THREE.Vector3();
+                bbox.getCenter(center);
+                labelPos = center;
+              }
+            }
+          }
+
+          // Fallback: flat XZ midpoint (used for 2D or when contact_wire not found)
+          if (!labelPos) {
+            const mx = (v.x1 + v.x2) / 2, mz = (v.z1 + v.z2) / 2;
+            labelPos = new THREE.Vector3(mx, 120, mz);
+          }
+
+          addLbl(v.label, labelPos);
         }
       });
     }
@@ -1603,6 +1636,46 @@ export class ViewerEngine {
     this.controls.target.set(cx, cy, cz);
     this.controls.update();
   }
+
+  /**
+   * Switch to 3D and frame a vane from its front elevation — camera looks
+   * along the track direction (the vane line direction) so you see the full
+   * dropper cross-section end-on.
+   *
+   * @param v       Vane endpoints in world-XZ (x1,z1)→(x2,z2)
+   * @param cwHeight  Contact-wire height in world-Y (mm)
+   */
+  public focusVane(v: { x1: number; z1: number; x2: number; z2: number }, cwHeight: number = 5400): void {
+    this.setViewMode('3D');
+
+    // Midpoint of the vane line
+    const cx = (v.x1 + v.x2) / 2;
+    const cz = (v.z1 + v.z2) / 2;
+    const cy = cwHeight;
+
+    // Vane direction (along the track)
+    const dx = v.x2 - v.x1;
+    const dz = v.z2 - v.z1;
+    const vaneLen = Math.hypot(dx, dz);
+
+    // Camera sits perpendicular to the vane → along the normal of the vane line
+    // (i.e. looking along the track direction so you see the dropper cross-section)
+    let nx = 0, nz = 1;
+    if (vaneLen > 0) {
+      // Normal = rotate 90°: (-dz, dx) normalised
+      nx = -dz / vaneLen;
+      nz = dx / vaneLen;
+    }
+
+    // Pull the camera back enough to see the full vane span + some vertical room
+    const viewDistance = Math.max(vaneLen * 0.6, 4000);
+
+    this.cam3D.position.set(cx + nx * viewDistance, cy + 1500, cz + nz * viewDistance);
+    this.cam3D.lookAt(cx, cy, cz);
+    this.controls.target.set(cx, cy, cz);
+    this.controls.update();
+  }
+
 
   public loadVaneLines(lines: ApiLine[], vaneKey: string): void {
     // Remove existing group for this vane key

@@ -136,7 +136,6 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
                                : components::CurveRadiusDirection::INSIDE;
 
     components::Track track = { trackGauge, { 50.0 } };
-
     components::Pole poleOrchestrator(pole3D, catSeparation, supportOffset, bottomFixedHeight, fixingDistance, 0.0, pv);
 
     for (int i=0; i < numCantilevers; ++i) {

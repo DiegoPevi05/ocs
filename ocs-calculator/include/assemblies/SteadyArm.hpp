@@ -50,6 +50,8 @@ public:
     math::Vec3 intersectionPoint;
     math::Vec3 intersectionTubeFixedPoint;
     math::Vec3 intersectionRegisterArmFixedPoint;
+    components::ConfigurationType config;
+    components::ContactWireConfiguration contactWireConfig;
 
     SteadyArm(const SteadyArmParams& params, 
               std::shared_ptr<BracketTube> bracketTube, 
@@ -61,6 +63,7 @@ public:
 
 private:
     void calculateIntersections(const CantileverFrame& frame);
+    math::Vec3 wireSupportStainlessSteelPoint; // from stayTube
 };
 
 } // namespace assemblies

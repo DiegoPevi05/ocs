@@ -34,8 +34,16 @@ std::vector<TubeDimension> Reinforcement::generateResults(const CantileverFrame&
 
 std::vector<viewer::Line3D> Reinforcement::getRenderLines() const {
     if (upperFixedPoint.x == 0 && upperFixedPoint.y == 0 && upperFixedPoint.z == 0) return {};
-    // Red for reinforcement arm
-    return { viewer::Line3D("Reinforcement", upperFixedPoint, bottomFixedPoint, 255, 0, 0, 255) };
+    
+    std::vector<viewer::Line3D> lines;
+    // Red for reinforcement links (255, 0, 0)
+    lines.push_back(viewer::Line3D("Reinforcement", upperEyeClampPoint, upperHookEndPoint, 255, 0, 0, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", bottomEyeClampPoint, bottomHookEndPoint, 255, 0, 0, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", upperHookEndPoint, upperFixedPoint, 255, 0, 0, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", bottomFixedPoint, bottomHookEndPoint, 255, 0, 0, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", upperFixedPoint, bottomFixedPoint, 255, 0, 0, 255));
+
+    return lines;
 }
 
 } // namespace assemblies

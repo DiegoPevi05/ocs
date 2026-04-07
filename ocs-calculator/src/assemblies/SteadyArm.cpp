@@ -12,6 +12,10 @@ SteadyArm::SteadyArm(const SteadyArmParams& params,
     : params(params), bracketTube(bracketTube), registerArm(registerArm) {}
 
 void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
+    config = frame.model.type.configuration;
+    contactWireConfig = frame.model.type.contactWireConfiguration;
+    wireSupportStainlessSteelPoint = bracketTube->stayTube->wireSupportStainlessSteelPoint;
+
     double angle = math::degreesToRadians(params.alpha);
     double cosAlpha = std::cos(angle);
     double sinAlpha = std::sin(angle);
@@ -21,10 +25,10 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
     perpK = math::invert(normalPlane);
     perpV = math::normalize(math::cross(dir, perpK));
 
-    // Calculate CW points
-    if (frame.model.type.contactWireConfiguration == components::ContactWireConfiguration::DOUBLE) {
-        if (components::isTdpLt2_2(frame.model.type.configuration) || components::isSba(frame.model.type.configuration)) {
-            if (components::isSba(frame.model.type.configuration) && params.eye_clamp_contact_wire) {
+    // Points (CW Axis)
+    if (contactWireConfig == components::ContactWireConfiguration::DOUBLE) {
+        if (components::isTdpLt2_2(config) || components::isSba(config)) {
+             if (components::isSba(config) && params.eye_clamp_contact_wire) {
                 double sep = (params.eye_clamp_contact_wire->A + params.eye_clamp_contact_wire->double_separation) - params.eye_clamp_contact_wire->C;
                 points.push_back(math::add(frame.cwAxis, math::scale(dir, sep)));
                 points.push_back(math::subtract(frame.cwAxis, math::scale(dir, sep)));
@@ -34,9 +38,7 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
             }
         } else if (params.swivel_clip && registerArm) {
             double angleDeg = params.alpha - params.swivel_clip->C;
-            if (components::isTdpGt2_2(frame.model.type.configuration)) {
-                angleDeg = 180.0 - (params.alpha + params.swivel_clip->C);
-            }
+            if (components::isTdpGt2_2(config)) angleDeg = 180.0 - (params.alpha + params.swivel_clip->C);
             math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg)), std::sin(math::degreesToRadians(angleDeg)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg)) };
             math::Vec3 v1 = math::add(frame.cwAxis, math::scale(CwXYDir, registerArm->params.drop_bracket.double_wire_separation_x / 2.0));
             points.push_back(math::add(v1, math::scale(perpK, registerArm->params.drop_bracket.double_wire_separation_z / 2.0)));
@@ -47,144 +49,81 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
         points.push_back(frame.cwAxis);
     }
 
-    // SteadyArm YAxis CW Point
-    if (!components::isSba(frame.model.type.configuration) && params.swivel_clip) {
+    // YAxisCWPoint
+    if (!components::isSba(config) && params.swivel_clip) {
         double angleDeg = 90.0 + params.alpha - params.swivel_clip->B;
-        if (components::isTdpGt2_2(frame.model.type.configuration) || components::isTdpLt2_2(frame.model.type.configuration)) {
-            angleDeg = 90.0 - params.alpha - params.swivel_clip->B;
-        }
+        if (components::isTdpGt2_2(config) || components::isTdpLt2_2(config)) angleDeg = 90.0 - params.alpha - params.swivel_clip->B;
         math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg)), std::sin(math::degreesToRadians(angleDeg)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg)) };
-
-        if (!points.empty()) {
-            yAxisCwPoint.push_back(math::add(points[0], math::scale(CwXYDir, params.swivel_clip->A)));
-            if (points.size() > 1) {
-                yAxisCwPoint.push_back(math::add(points[1], math::scale(CwXYDir, params.swivel_clip->A)));
-            }
-        }
+        for (const auto& pt : points) yAxisCwPoint.push_back(math::add(pt, math::scale(CwXYDir, params.swivel_clip->A)));
     }
 
-    // SteadyArm Fixed Point
-    if (components::isSba(frame.model.type.configuration) && params.eye_clamp_contact_wire) {
+    // Fixed Point
+    if (components::isSba(config) && params.eye_clamp_contact_wire) {
         double angleDeg = math::radiansToDegrees(std::atan(params.eye_clamp_contact_wire->B / params.eye_clamp_contact_wire->C)) + params.alpha;
         double length = std::sqrt(std::pow(params.eye_clamp_contact_wire->B, 2) + std::pow(params.eye_clamp_contact_wire->C, 2));
         math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg)), std::sin(math::degreesToRadians(angleDeg)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg)) };
-        if (!points.empty()) {
-            fixedPoint.push_back(math::add(points[0], math::scale(CwXYDir, length)));
-            if (points.size() > 1) {
-                double angleDeg2 = 180.0 - math::radiansToDegrees(std::atan(params.eye_clamp_contact_wire->B / params.eye_clamp_contact_wire->C)) + params.alpha;
-                math::Vec3 CwXYDir2 = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg2)), std::sin(math::degreesToRadians(angleDeg2)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg2)) };
-                fixedPoint.push_back(math::add(points[1], math::scale(CwXYDir2, length)));
-            }
+        fixedPoint.push_back(math::add(points[0], math::scale(CwXYDir, length)));
+        if (points.size() > 1) {
+            double angleDeg2 = 180.0 - math::radiansToDegrees(std::atan(params.eye_clamp_contact_wire->B / params.eye_clamp_contact_wire->C)) + params.alpha;
+            math::Vec3 CwXYDir2 = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg2)), std::sin(math::degreesToRadians(angleDeg2)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg2)) };
+            fixedPoint.push_back(math::add(points[1], math::scale(CwXYDir2, length)));
         }
     } else if (params.swivel_clip && !yAxisCwPoint.empty()) {
         double angleDeg = params.alpha;
-        if (components::isTdpLt2_2(frame.model.type.configuration) || components::isTdpGt2_2(frame.model.type.configuration)) {
-            angleDeg = 180.0 + params.alpha;
-        }
+        if (components::isTdpLt2_2(config) || components::isTdpGt2_2(config)) angleDeg = 180.0 + params.alpha;
         math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg)), std::sin(math::degreesToRadians(angleDeg)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg)) };
-        fixedPoint.push_back(math::add(yAxisCwPoint[0], math::scale(CwXYDir, params.swivel_clip->B)));
-        if (yAxisCwPoint.size() > 1) {
-            fixedPoint.push_back(math::add(yAxisCwPoint[1], math::scale(CwXYDir, params.swivel_clip->B)));
-        }
+        for (const auto& pt : yAxisCwPoint) fixedPoint.push_back(math::add(pt, math::scale(CwXYDir, params.swivel_clip->B)));
     }
 
-    // End points
+    // End Points
     if (!fixedPoint.empty()) {
-        if (components::isCai(frame.model.type.configuration)) {
-            endPoint.push_back(math::subtract(fixedPoint[0], math::scale(dir, params.end_distance)));
-            if (fixedPoint.size() > 1 && registerArm) {
-                endPoint.push_back(math::subtract(fixedPoint[1], math::scale(dir, params.end_distance)));
-            }
-        } else {
-            endPoint.push_back(math::add(fixedPoint[0], math::scale(dir, params.end_distance)));
-            if (fixedPoint.size() > 1) {
-                endPoint.push_back(math::add(fixedPoint[1], math::scale(dir, params.end_distance)));
-            }
+        double dist = params.end_distance;
+        for (const auto& pt : fixedPoint) {
+            if (components::isCai(config)) endPoint.push_back(math::subtract(pt, math::scale(dir, dist)));
+            else endPoint.push_back(math::add(pt, math::scale(dir, dist)));
         }
     }
 
-    if (components::isSba(frame.model.type.configuration) && params.eye_clamp_distance && !fixedPoint.empty()) {
+    if (components::isSba(config) && params.eye_clamp_distance && !fixedPoint.empty()) {
         eyeClampPoint = math::add(fixedPoint[0], math::scale(math::invert(dir), *params.eye_clamp_distance));
-        if (params.eye_clamp) {
-            eyeClampFixedPoint = math::add(eyeClampPoint, math::scale(perpV, params.eye_clamp->h));
-        }
+        if (params.eye_clamp) eyeClampFixedPoint = math::add(eyeClampPoint, math::scale(perpV, params.eye_clamp->h));
     }
 
-    // Optional calculations specific to clamps
-    if ((components::isTdpGt2_2(frame.model.type.configuration) || components::isCai(frame.model.type.configuration)) && params.hook_end_clamp && params.swivel_clip) {
+    // Hook Clamps
+    if ((components::isTdpGt2_2(config) || components::isCai(config)) && params.hook_end_clamp && params.swivel_clip) {
         double cvd = params.hook_end_clamp->H / std::cos(math::degreesToRadians(params.alpha));
         double scid = params.swivel_clip->A - cvd;
         double AngleB = 90.0 + params.swivel_clip->C;
         double AngleA = std::asin((scid * std::sin(math::degreesToRadians(AngleB))) / params.length);
         double AngleC = 180.0 - math::radiansToDegrees(AngleA) - AngleB;
         double finalAngle = (90.0 - AngleC) + (params.alpha - params.swivel_clip->C);
-        if (components::isTdpGt2_2(frame.model.type.configuration)) {
-            finalAngle = (90.0 - AngleC) + (-params.alpha - params.swivel_clip->C);
-        }
-        double AngleModified = components::isTdpGt2_2(frame.model.type.configuration) ? 180.0 - finalAngle : finalAngle;
-        
+        if (components::isTdpGt2_2(config)) finalAngle = (90.0 - AngleC) + (-params.alpha - params.swivel_clip->C);
+        double AngleModified = components::isTdpGt2_2(config) ? 180.0 - finalAngle : finalAngle;
         math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(AngleModified)), std::sin(math::degreesToRadians(AngleModified)), frame.directionPv.z * std::cos(math::degreesToRadians(AngleModified)) };
-        if (!points.empty()) {
-            hookClampPointClamp.push_back(math::add(points[0], math::scale(CwXYDir, params.length)));
-            if (points.size() > 1) {
-                hookClampPointClamp.push_back(math::add(points[1], math::scale(CwXYDir, params.length)));
-            }
-        }
+        for (const auto& pt : points) hookClampPointClamp.push_back(math::add(pt, math::scale(CwXYDir, params.length)));
         
         double a = math::radiansToDegrees(std::atan(params.hook_end_clamp->Y / params.hook_end_clamp->H));
         double dist = std::hypot(params.hook_end_clamp->Y, params.hook_end_clamp->H);
-        double Amp = components::isTdpGt2_2(frame.model.type.configuration) ? (90.0 - a + params.alpha) : (90.0 + a + params.alpha);
+        double Amp = components::isTdpGt2_2(config) ? (90.0 - a + params.alpha) : (90.0 + a + params.alpha);
         math::Vec3 Cxp = { frame.directionPv.x * std::cos(math::degreesToRadians(Amp)), std::sin(math::degreesToRadians(Amp)), frame.directionPv.z * std::cos(math::degreesToRadians(Amp)) };
-        
-        if (!hookClampPointClamp.empty()) {
-            hookClampPoint.push_back(math::add(hookClampPointClamp[0], math::scale(Cxp, dist)));
-            if (hookClampPointClamp.size() > 1 && registerArm) {
-                hookClampPoint.push_back(math::add(hookClampPointClamp[1], math::scale(Cxp, dist)));
-            }
-        }
+        for (const auto& pt : hookClampPointClamp) hookClampPoint.push_back(math::add(pt, math::scale(Cxp, dist)));
     }
 
-    // Compute hookClampIntersectionSupport and hookFixedPoint (required before injecting into register arm)
     if (registerArm && !hookClampPoint.empty() && params.hook_end_clamp) {
         double angleBetweenClampAndSupport = 270.0 + params.alpha;
-        double extension_rotation;
-        if (components::isTdpGt2_2(frame.model.type.configuration)) {
-            extension_rotation = params.hook_end_clamp->A
-                * std::tan(math::degreesToRadians(params.alpha + (-registerArm->params.alpha)))
-                * -1.0;
-        } else {
-            extension_rotation = params.hook_end_clamp->A
-                * std::tan(math::degreesToRadians(params.alpha + (-registerArm->params.alpha)));
-        }
-
-        double cosA = std::cos(math::degreesToRadians(angleBetweenClampAndSupport));
-        double sinA = std::sin(math::degreesToRadians(angleBetweenClampAndSupport));
-        math::Vec3 CwXYDir = { frame.directionPv.x * cosA, sinA, frame.directionPv.z * cosA };
-
-        for (const auto& pt : hookClampPoint) {
-            hookClampIntersectionSupport.push_back(
-                math::add(pt, math::scale(CwXYDir, params.hook_end_clamp->H + extension_rotation))
-            );
-        }
-
-        // hookFixedPoint from hookClampIntersectionSupport
-        double angleModified = components::isTdpGt2_2(frame.model.type.configuration)
-            ? 180.0 + registerArm->params.alpha
-            : registerArm->params.alpha;
-        double cosB = std::cos(math::degreesToRadians(angleModified));
-        double sinB = std::sin(math::degreesToRadians(angleModified));
-        math::Vec3 CwXYDir2 = { frame.directionPv.x * cosB, sinB, frame.directionPv.z * cosB };
-
-        for (const auto& pt : hookClampIntersectionSupport) {
-            hookFixedPoint.push_back(
-                math::add(pt, math::scale(CwXYDir2, params.hook_end_clamp->B))
-            );
-        }
+        double extension_rotation = params.hook_end_clamp->A * std::tan(math::degreesToRadians(params.alpha - registerArm->params.alpha));
+        if (components::isTdpGt2_2(config)) extension_rotation *= -1.0;
+        math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(angleBetweenClampAndSupport)), std::sin(math::degreesToRadians(angleBetweenClampAndSupport)), frame.directionPv.z * std::cos(math::degreesToRadians(angleBetweenClampAndSupport)) };
+        for (const auto& pt : hookClampPoint) hookClampIntersectionSupport.push_back(math::add(pt, math::scale(CwXYDir, params.hook_end_clamp->H + extension_rotation)));
+        
+        double angleModified = components::isTdpGt2_2(config) ? 180.0 + registerArm->params.alpha : registerArm->params.alpha;
+        math::Vec3 CwXYDir2 = { frame.directionPv.x * std::cos(math::degreesToRadians(angleModified)), std::sin(math::degreesToRadians(angleModified)), frame.directionPv.z * std::cos(math::degreesToRadians(angleModified)) };
+        for (const auto& pt : hookClampIntersectionSupport) hookFixedPoint.push_back(math::add(pt, math::scale(CwXYDir2, params.hook_end_clamp->B)));
     }
 
     if (registerArm) {
-        // Inject the fully-derived hook fixed point (not the raw clamp point)
         registerArm->injectSteadyArmHooks(!hookFixedPoint.empty() ? hookFixedPoint : hookClampPoint);
+        registerArm->injectWireSupportStainlessSteelPoint(wireSupportStainlessSteelPoint);
         registerArm->calculateGeometry(frame);
     }
 
@@ -192,7 +131,6 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
 }
 
 void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
-    
     auto solveLines = [](math::Vec3 P1, math::Vec3 D1, math::Vec3 P2, math::Vec3 D2) {
         math::Vec3 r = math::subtract(P1, P2);
         double a = math::dot(D1, D1), b = math::dot(D1, D2), c = math::dot(D2, D2), d = math::dot(D1, r), e = math::dot(D2, r);
@@ -205,51 +143,36 @@ void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
         return math::Vec3{ 0.5*(pt1.x + pt2.x), 0.5*(pt1.y + pt2.y), 0.5*(pt1.z + pt2.z) };
     };
 
-    if (components::isSba(frame.model.type.configuration) || components::isTdpLt2_2(frame.model.type.configuration)) {
+    if (components::isSba(config) || components::isTdpLt2_2(config)) {
         if (!endPoint.empty()) {
             math::Vec3 P1 = bracketTube->bottomFixedPoint;
             math::Vec3 D1 = math::getDirectionVector(bracketTube->upperEyeClampClevisFixedPoint, P1);
             intersectionPoint = solveLines(P1, D1, endPoint[0], dir);
-
-            math::Vec3 D3 = bracketTube->perp;
-            double h = bracketTube->params.eye_clamp.h;
-            math::Vec3 P2_shift = math::subtract(endPoint[0], math::scale(D3, h));
-            math::Vec3 ipt = solveLines(intersectionPoint, bracketTube->dir, P2_shift, dir);
-            intersectionTubeFixedPoint = ipt;
-            intersectionRegisterArmFixedPoint = math::add(ipt, math::scale(D3, h));
-            intersectionFixedPoint = intersectionRegisterArmFixedPoint;
-
-            if (params.hook_end_fitting) {
-                double hl = params.hook_end_fitting->L - params.hook_end_fitting->a;
-                hookEndFittingPoint = math::add(intersectionRegisterArmFixedPoint, math::scale(dir, hl));
+            math::Vec3 P2_shift = math::subtract(endPoint[0], math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
+            intersectionTubeFixedPoint = solveLines(intersectionPoint, bracketTube->dir, P2_shift, dir);
+            intersectionRegisterArmFixedPoint = math::add(intersectionTubeFixedPoint, math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
+            if (params.hook_end_fitting) hookEndFittingPoint = math::add(intersectionRegisterArmFixedPoint, math::scale(dir, params.hook_end_fitting->L - params.hook_end_fitting->a));
+            if (registerArm) {
+                registerArm->injectIntersectionPoint(intersectionRegisterArmFixedPoint);
+                registerArm->injectIntersectionTubePoint(intersectionTubeFixedPoint);
             }
         }
-    } else if ((components::isTdpGt2_2(frame.model.type.configuration) || components::isCai(frame.model.type.configuration)) && registerArm) {
+    } else if (registerArm) {
         math::Vec3 P1 = bracketTube->bottomFixedPoint;
         math::Vec3 D1 = math::getDirectionVector(bracketTube->upperEyeClampClevisFixedPoint, P1);
         intersectionPoint = solveLines(P1, D1, registerArm->bracketUpperFixedPoint, registerArm->dir);
-
-        math::Vec3 D3 = bracketTube->perp;
-        double h = bracketTube->params.eye_clamp.h;
-        math::Vec3 P2_shift = math::subtract(registerArm->bracketUpperFixedPoint, math::scale(D3, h));
-        math::Vec3 ipt = solveLines(intersectionPoint, bracketTube->dir, P2_shift, registerArm->dir);
-        intersectionTubeFixedPoint = ipt;
-        intersectionRegisterArmFixedPoint = math::add(ipt, math::scale(D3, h));
-        intersectionFixedPoint = intersectionRegisterArmFixedPoint;
-
-        if (params.hook_end_fitting) {
-            double hl = params.hook_end_fitting->L - params.hook_end_fitting->a;
-            hookEndFittingPoint = math::add(registerArm->eyeClampFixedPoint, math::scale(dir, hl));
-        }
-
-        // Supply data back to registerArm if needed
+        math::Vec3 P2_shift = math::subtract(registerArm->bracketUpperFixedPoint, math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
+        intersectionTubeFixedPoint = solveLines(intersectionPoint, bracketTube->dir, P2_shift, registerArm->dir);
+        intersectionRegisterArmFixedPoint = math::add(intersectionTubeFixedPoint, math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
+        if (params.hook_end_fitting) hookEndFittingPoint = math::add(registerArm->eyeClampFixedPoint, math::scale(dir, params.hook_end_fitting->L - params.hook_end_fitting->a));
         registerArm->injectIntersectionPoint(intersectionRegisterArmFixedPoint);
+        registerArm->injectIntersectionTubePoint(intersectionTubeFixedPoint);
     }
 }
 
 std::vector<TubeDimension> SteadyArm::generateResults(const CantileverFrame& frame) const {
     std::vector<TubeDimension> res;
-    if (!components::isCai(frame.model.type.configuration) && !endPoint.empty()) {
+    if (!components::isCai(config) && !endPoint.empty()) {
         double d3 = math::distanceBetween(endPoint[0], hookEndFittingPoint);
         res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d3), std::round(d3) + 10.0});
     } else if (!fixedPoint.empty() && !hookClampPoint.empty()) {
@@ -260,20 +183,31 @@ std::vector<TubeDimension> SteadyArm::generateResults(const CantileverFrame& fra
 }
 
 std::vector<viewer::Line3D> SteadyArm::getRenderLines() const {
+    if (fixedPoint.empty() && endPoint.empty()) return {};
     std::vector<viewer::Line3D> lines;
-    // hookClampPoint is only populated for TDP>2.2 / CAI — use it as discriminator
-    if (!hookClampPoint.empty() && !fixedPoint.empty()) {
-        // TDP>2.2 / CAI: main steady arm tube is fixedPoint → hookClampPoint
-        lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], hookClampPoint[0], 255, 128, 0, 255));
-        if (!hookClampIntersectionSupport.empty()) {
-            lines.push_back(viewer::Line3D("Steady Arm Hook Clamp", hookClampIntersectionSupport[0], hookClampPoint[0], 255, 165, 0, 255));
+    if (components::isSba(config)) {
+        if (!fixedPoint.empty()) {
+            if (!points.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], points[0], 255, 121, 0, 255));
+            if (!endPoint.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], endPoint[0], 255, 121, 0, 255));
+            lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], eyeClampPoint, 255, 121, 0, 255));
         }
-        if (!hookFixedPoint.empty() && !hookClampIntersectionSupport.empty()) {
-            lines.push_back(viewer::Line3D("Steady Arm Hook Fixed", hookClampIntersectionSupport[0], hookFixedPoint[0], 255, 200, 0, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", hookEndFittingPoint, eyeClampPoint, 255, 121, 0, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", eyeClampPoint, eyeClampFixedPoint, 255, 121, 0, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 255, 121, 0, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 255, 121, 0, 255));
+        if (contactWireConfig == components::ContactWireConfiguration::DOUBLE && fixedPoint.size() > 1 && points.size() > 1) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[1], points[1], 255, 121, 0, 255));
+    } else {
+        if (!yAxisCwPoint.empty() && !points.empty()) {
+            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], points[0], 255, 121, 0, 255));
+            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], fixedPoint[0], 255, 121, 0, 255));
         }
-    } else if (!endPoint.empty() && (hookEndFittingPoint.x != 0 || hookEndFittingPoint.y != 0 || hookEndFittingPoint.z != 0)) {
-        // SBA / TDP<2.2
-        lines.push_back(viewer::Line3D("Steady Arm", endPoint[0], hookEndFittingPoint, 255, 128, 0, 255));
+        if (!hookClampPoint.empty() && !fixedPoint.empty()) {
+            lines.push_back(viewer::Line3D("Steady Arm", hookClampPoint[0], fixedPoint[0], 255, 121, 0, 255));
+            if (!hookClampIntersectionSupport.empty()) {
+                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookClampPoint[0], 255, 121, 0, 255));
+                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookFixedPoint[0], 255, 121, 0, 255));
+            }
+        }
     }
     return lines;
 }

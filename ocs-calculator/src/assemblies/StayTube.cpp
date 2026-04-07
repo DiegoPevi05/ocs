@@ -40,11 +40,13 @@ void StayTube::calculateGeometry(const CantileverFrame& frame) {
         components::isSba(frame.model.type.configuration)) {
         dToFixPoint = Alen - (params.mw_support.wireSupport.A - params.mw_support.wireSupport.D);
     }
-    math::Vec3 wsFixedPoint = math::add(upperFixedPoint, math::scale(dir, dToFixPoint));
+    wireSupportFixedPoint = math::add(upperFixedPoint, math::scale(dir, dToFixPoint));
+    wireSupportFixedPointPpToMw = math::add(upperFixedPoint, math::scale(dir, Alen));
+    mwAxis = frame.mwAxis; // Need to store this for rendering link_106
 
-    wireSupportStainlessSteelPoint = math::add(wsFixedPoint, math::invert(math::scale(perp, params.mw_support.wireSupport.C)));
-    upperTubeEndPoint = math::add(wsFixedPoint, math::scale(dir, params.mw_support.end_distance));
-    upperTubeEyeClampTubeFixedPoint = math::add(wsFixedPoint, math::invert(math::scale(dir, params.mw_support.eye_clamp_distance)));
+    wireSupportStainlessSteelPoint = math::add(wireSupportFixedPoint, math::invert(math::scale(perp, params.mw_support.wireSupport.C)));
+    upperTubeEndPoint = math::add(wireSupportFixedPoint, math::scale(dir, params.mw_support.end_distance));
+    upperTubeEyeClampTubeFixedPoint = math::add(wireSupportFixedPoint, math::invert(math::scale(dir, params.mw_support.eye_clamp_distance)));
     upperIsolatorPoint = math::add(upperFixedPoint, math::scale(dir, frame.getIsolatorUtilLength(params.isolator)));
     upperTubeEyeClampFixedPoint = math::add(upperTubeEyeClampTubeFixedPoint, math::invert(math::scale(perp, params.eye_clamp.h)));
 }
@@ -58,8 +60,17 @@ std::vector<TubeDimension> StayTube::generateResults(const CantileverFrame& fram
 
 std::vector<viewer::Line3D> StayTube::getRenderLines() const {
     if (upperIsolatorPoint.x == 0 && upperIsolatorPoint.y == 0 && upperIsolatorPoint.z == 0) return {};
-    // Blue for stay tube
-    return { viewer::Line3D("Stay Tube", upperIsolatorPoint, upperTubeEndPoint, 0, 121, 241, 255) };
+    
+    std::vector<viewer::Line3D> lines;
+    // Blue for stay tube links
+    lines.push_back(viewer::Line3D("Stay Tube", upperIsolatorPoint, upperTubeEyeClampTubeFixedPoint, 0, 121, 241, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", upperTubeEyeClampTubeFixedPoint, wireSupportFixedPoint, 0, 121, 241, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", upperTubeEyeClampTubeFixedPoint, upperTubeEyeClampFixedPoint, 0, 121, 241, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPoint, upperTubeEndPoint, 0, 121, 241, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPoint, wireSupportStainlessSteelPoint, 0, 121, 241, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPointPpToMw, mwAxis, 0, 121, 241, 255));
+
+    return lines;
 }
 
 } // namespace assemblies

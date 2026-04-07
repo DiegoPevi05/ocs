@@ -34,12 +34,18 @@ public:
     // Additional data to store from other assemblies (for calculation sequence)
     std::vector<math::Vec3> steadyArmHookFixedPoint;
     math::Vec3 intersectionRegisterArmFixedPoint; 
+    math::Vec3 intersectionTubeFixedPoint;
+    math::Vec3 wireSupportStainlessSteelPoint;
+    components::ConfigurationType config;
+    components::ContactWireConfiguration contactWireConfig;
 
     RegisterArm(const RegisterArmParams& params);
 
     // Call after SteadyArm fills its data, OR let builder supply the points.
     void injectSteadyArmHooks(const std::vector<math::Vec3>& hooks);
     void injectIntersectionPoint(const math::Vec3& intersection);
+    void injectIntersectionTubePoint(const math::Vec3& intersection);
+    void injectWireSupportStainlessSteelPoint(const math::Vec3& pt);
 
     void calculateGeometry(const CantileverFrame& frame) override;
     std::vector<TubeDimension> generateResults(const CantileverFrame& frame) const override;

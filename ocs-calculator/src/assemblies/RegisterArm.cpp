@@ -14,10 +14,21 @@ void RegisterArm::injectSteadyArmHooks(const std::vector<math::Vec3>& hooks) {
 void RegisterArm::injectIntersectionPoint(const math::Vec3& intersection) {
     intersectionRegisterArmFixedPoint = intersection;
     double length = params.hook_end_fitting.L - params.hook_end_fitting.a;
-    hookEndFittingPoint = math::add(intersectionRegisterArmFixedPoint, math::scale(dir, length));
+    hookEndFittingPoint = math::add(bracketUpperFixedPoint, math::scale(dir, length));
+}
+
+void RegisterArm::injectIntersectionTubePoint(const math::Vec3& intersection) {
+    intersectionTubeFixedPoint = intersection;
+}
+
+void RegisterArm::injectWireSupportStainlessSteelPoint(const math::Vec3& pt) {
+    wireSupportStainlessSteelPoint = pt;
 }
 
 void RegisterArm::calculateGeometry(const CantileverFrame& frame) {
+    config = frame.model.type.configuration;
+    contactWireConfig = frame.model.type.contactWireConfiguration;
+
     math::Vec3 dirXZ = frame.directionPv;
     double cosAlpha = std::cos(math::degreesToRadians(params.alpha));
     double sinAlpha = std::sin(math::degreesToRadians(params.alpha));
@@ -38,8 +49,6 @@ void RegisterArm::calculateGeometry(const CantileverFrame& frame) {
         double sinA = std::sin(math::degreesToRadians(AngleModified));
         math::Vec3 CwXYDir = { frame.directionPv.x * cosA, sinA, frame.directionPv.z * cosA };
 
-        // For simplicity, we port the exact same logic.
-        // Assumes steady arm hook clamp is active.
         if (components::isTdpGt2_2(frame.model.type.configuration) || components::isCai(frame.model.type.configuration)) {
             math::Vec3 V0 = math::add(steadyArmHookFixedPoint[0], math::scale(CwXYDir, params.drop_bracket.x1));
             
@@ -90,26 +99,32 @@ std::vector<TubeDimension> RegisterArm::generateResults(const CantileverFrame& f
 }
 
 std::vector<viewer::Line3D> RegisterArm::getRenderLines() const {
-    if (endPoint.x == 0 && endPoint.y == 0 && endPoint.z == 0) return {};
+    if (bracketUpperFixedPoint.x == 0 && bracketUpperFixedPoint.y == 0 && bracketUpperFixedPoint.z == 0) return {};
+    
     std::vector<viewer::Line3D> lines;
-    // Drop bracket: bracketBottomPoint[0] → bracketUpperFixedPoint
-    if (!bracketBottomPoint.empty()) {
-        lines.push_back(viewer::Line3D("Register Arm Drop Bracket", bracketBottomPoint[0], bracketUpperFixedPoint, 153, 50, 204, 255));
-    }
-    // Register arm tube upper: bracketUpperFixedPoint → hookEndFittingPoint
-    if (hookEndFittingPoint.x != 0 || hookEndFittingPoint.y != 0 || hookEndFittingPoint.z != 0) {
-        lines.push_back(viewer::Line3D("Register Arm Upper", bracketUpperFixedPoint, hookEndFittingPoint, 153, 50, 204, 255));
-        // Register arm tube lower: hookEndFittingPoint → intersectionRegisterArmFixedPoint
-        if (intersectionRegisterArmFixedPoint.x != 0 || intersectionRegisterArmFixedPoint.y != 0 || intersectionRegisterArmFixedPoint.z != 0) {
-            lines.push_back(viewer::Line3D("Register Arm Lower", hookEndFittingPoint, intersectionRegisterArmFixedPoint, 153, 50, 204, 255));
+    // Purple for register arm links (153, 50, 204)
+
+    if (config == components::ConfigurationType::TDP_GT_2_2 || config == components::ConfigurationType::CAI) {
+        if (!bracketBottomPoint.empty() && !steadyArmHookFixedPoint.empty()) {
+            if (contactWireConfig == components::ContactWireConfiguration::SINGLE) {
+                lines.push_back(viewer::Line3D("Register Arm", bracketBottomPoint[0], steadyArmHookFixedPoint[0], 153, 50, 204, 255));
+            } else if (bracketBottomPoint.size() >= 3 && steadyArmHookFixedPoint.size() >= 2) {
+                lines.push_back(viewer::Line3D("Register Arm", bracketBottomPoint[1], steadyArmHookFixedPoint[0], 153, 50, 204, 255));
+                lines.push_back(viewer::Line3D("Register Arm", bracketBottomPoint[2], steadyArmHookFixedPoint[1], 153, 50, 204, 255));
+                lines.push_back(viewer::Line3D("Register Arm", bracketBottomPoint[1], bracketBottomPoint[2], 153, 50, 204, 255));
+            }
+            lines.push_back(viewer::Line3D("Register Arm", bracketBottomPoint[0], bracketUpperFixedPoint, 153, 50, 204, 255));
         }
+
+        lines.push_back(viewer::Line3D("Register Arm", bracketUpperFixedPoint, eyeClampPoint, 153, 50, 204, 255));
+        lines.push_back(viewer::Line3D("Register Arm", endPoint, eyeClampPoint, 153, 50, 204, 255));
+        lines.push_back(viewer::Line3D("Register Arm", eyeClampFixedPoint, eyeClampPoint, 153, 50, 204, 255));
+        lines.push_back(viewer::Line3D("Register Arm", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 153, 50, 204, 255));
+        lines.push_back(viewer::Line3D("Register Arm", bracketUpperFixedPoint, hookEndFittingPoint, 153, 50, 204, 255));
+        lines.push_back(viewer::Line3D("Register Arm", hookEndFittingPoint, intersectionRegisterArmFixedPoint, 153, 50, 204, 255));
+        lines.push_back(viewer::Line3D("Register Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 153, 50, 204, 255));
     }
-    // Eye clamp: eyeClampPoint → eyeClampFixedPoint
-    if (eyeClampPoint.x != 0 || eyeClampPoint.y != 0 || eyeClampPoint.z != 0) {
-        lines.push_back(viewer::Line3D("Register Arm Eye Clamp", eyeClampPoint, eyeClampFixedPoint, 180, 80, 220, 255));
-        // Also draw from bracketUpperFixedPoint to eyeClampPoint (end-to-eye section)
-        lines.push_back(viewer::Line3D("Register Arm End", endPoint, eyeClampPoint, 153, 50, 204, 255));
-    }
+
     return lines;
 }
 

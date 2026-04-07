@@ -9,6 +9,7 @@ BracketTube::BracketTube(const BracketTubeParams& params, std::shared_ptr<StayTu
     : params(params), stayTube(stayTube) {}
 
 void BracketTube::calculateGeometry(const CantileverFrame& frame) {
+    bottomPoleFixedPoint = frame.bottomPoleFixedPoint;
     double distance = params.swivel_clevis.pin_eye + params.swivel_bracket.x_pin;
     bottomFixedPoint = math::getPointFromDirection(frame.bottomPoleFixedPoint, frame.directionPv, distance);
 
@@ -41,8 +42,15 @@ std::vector<TubeDimension> BracketTube::generateResults(const CantileverFrame& f
 
 std::vector<viewer::Line3D> BracketTube::getRenderLines() const {
     if (bottomIsolatorPoint.x == 0 && bottomIsolatorPoint.y == 0 && bottomIsolatorPoint.z == 0) return {};
-    // Green for bracket tube
-    return { viewer::Line3D("Bracket Tube", bottomIsolatorPoint, upperEyeClampClevisFixedPoint, 0, 228, 48, 255) };
+    
+    std::vector<viewer::Line3D> lines;
+    // Green for bracket tube links
+    lines.push_back(viewer::Line3D("Bracket Tube", bottomPoleFixedPoint, bottomFixedPoint, 0, 228, 48, 255));
+    lines.push_back(viewer::Line3D("Bracket Tube", upperEyeClampClevisFixedPoint, stayTube->upperTubeEyeClampFixedPoint, 0, 228, 48, 255));
+    lines.push_back(viewer::Line3D("Bracket Tube", bottomFixedPoint, bottomIsolatorPoint, 0, 228, 48, 255));
+    lines.push_back(viewer::Line3D("Bracket Tube", bottomIsolatorPoint, upperEyeClampClevisFixedPoint, 0, 228, 48, 255));
+
+    return lines;
 }
 
 } // namespace assemblies

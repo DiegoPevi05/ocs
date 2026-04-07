@@ -31,8 +31,11 @@ public:
     math::Vec3 upperTubeEyeClampTubeFixedPoint;
     math::Vec3 upperIsolatorPoint;
     math::Vec3 upperTubeEndPoint;
-    math::Vec3 wireSupportStainlessSteelPoint;
     math::Vec3 upperTubeEyeClampFixedPoint;
+    math::Vec3 wireSupportStainlessSteelPoint;
+    math::Vec3 wireSupportFixedPoint;
+    math::Vec3 wireSupportFixedPointPpToMw;
+    math::Vec3 mwAxis;
 
     StayTube(const StayTubeParams& params);
     

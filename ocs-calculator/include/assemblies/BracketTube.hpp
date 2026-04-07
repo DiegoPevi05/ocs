@@ -27,6 +27,7 @@ public:
     math::Vec3 bottomIsolatorPoint;
     math::Vec3 upperEyeClampClevisFixedPoint;
     math::Vec3 upperEyeClampClevisStainlessSteelPoint;
+    math::Vec3 bottomPoleFixedPoint;
 
     BracketTube(const BracketTubeParams& params, std::shared_ptr<StayTube> stayTube);
     

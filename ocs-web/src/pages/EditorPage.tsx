@@ -176,7 +176,7 @@ export default function EditorPage() {
   const calcResultsRef = useRef<ApiResponse[]>([]);
   // Per-index caches populated from the initial /calculated fetch
   const calcByCantiIdx = useRef<Map<number, CalcCantileverEntry>>(new Map());
-  const calcByVaneIdx  = useRef<Map<number, CalcVaneEntry>>(new Map());
+  const calcByVaneIdx = useRef<Map<number, CalcVaneEntry>>(new Map());
   const hasInitialCalc = useRef(false);
   const calcExpectedRef = useRef<number>(0);
 
@@ -231,7 +231,7 @@ export default function EditorPage() {
       .then(r => r.json())
       .then((res: CalcLocationResponse) => {
         if (res.status !== 'success') {
-          api.locations.get(locationId).then(applyScene).catch(() => {});
+          api.locations.get(locationId).then(applyScene).catch(() => { });
           return;
         }
 
@@ -274,7 +274,7 @@ export default function EditorPage() {
         }
       })
       .catch(() => {
-        api.locations.get(locationId).then(applyScene).catch(() => {});
+        api.locations.get(locationId).then(applyScene).catch(() => { });
       });
   }, [locationId]);
 
@@ -299,7 +299,7 @@ export default function EditorPage() {
             // The batch response poles[] follow the same order as the sent cantilevers[].
             // Reconstruct the cantileverIndex mapping using the current cantilevers state.
             const curCantis = cantileversRef.current;
-            const curPoles  = polesRef.current;
+            const curPoles = polesRef.current;
             let outIdx = 0;
             for (let ci = 0; ci < curCantis.length; ci++) {
               const c = curCantis[ci];
@@ -428,7 +428,6 @@ export default function EditorPage() {
           steadyArmLength: c.steadyArmLength ?? 1200,
         };
       });
-
       stompRef.current?.publish({ destination: '/app/calculate/batch', body: JSON.stringify(payloads) });
     }, 400);
   }, []);

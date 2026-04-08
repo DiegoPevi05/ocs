@@ -113,7 +113,7 @@ void Viewer3D::Show(const std::vector<Line3D>& poleLines, const std::vector<Line
         DrawText("- Use MOUSE CLICK (Hold) to Orbit, SCROLL to Zoom, ARROWS or WSAD to Pan", 10, 40, 15, GRAY);
         
         // User Requested Coordinate Logging Table
-        int yOffset = 80;
+        /*int yOffset = 80;
         DrawText("Assembly Coordinate Table (mm)", 10, yOffset, 18, BLACK);
         yOffset += 25;
         
@@ -124,7 +124,7 @@ void Viewer3D::Show(const std::vector<Line3D>& poleLines, const std::vector<Line
                      line.end.x, line.end.y, line.end.z);
             DrawText(buffer, 10, yOffset, 14, Color{line.r, line.g, line.b, 255});
             yOffset += 22;
-        }
+        }*/
         
         EndDrawing();
     }

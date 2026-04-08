@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ─── Options ──────────────────────────────────────────────────────────────────
 # Set OFF for server-only / Docker builds (skips raylib download & compile).
-option(BUILD_CLI "Build the desktop CLI viewer (requires raylib + display)" OFF)
+option(BUILD_CLI "Build the desktop CLI viewer (requires raylib + display)" ON)
 
 include(FetchContent)
 
@@ -61,7 +61,7 @@ target_link_libraries(catenary_server PRIVATE catenary_lib nlohmann_json::nlohma
 if(BUILD_CLI)
   add_executable(catenary_cli src/main.cpp src/viewer/Viewer3D.cpp)
   target_include_directories(catenary_cli PUBLIC include)
-  target_link_libraries(catenary_cli PRIVATE catenary_lib raylib)
+  target_link_libraries(catenary_cli PRIVATE catenary_lib raylib nlohmann_json::nlohmann_json)
 endif()
 
 # ─── Tests ────────────────────────────────────────────────────────────────────

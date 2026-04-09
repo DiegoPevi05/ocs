@@ -320,7 +320,7 @@ std::vector<viewer::Line3D> VaneBuilder::getAssemblyLines() const {
         math::Vec3 p2 = diffElementsPositions[i+1];
         p2.y += diffHeights[i+1];
         
-        lines.push_back(viewer::Line3D("SupportWire", p1, p2, 50, 50, 255, 255));
+        lines.push_back(viewer::Line3D("SupportWire", p1, p2, 147, 51, 234, 255));
     }
     
     // Contact wire curve
@@ -331,7 +331,7 @@ std::vector<viewer::Line3D> VaneBuilder::getAssemblyLines() const {
         math::Vec3 p2 = diffElementsPositions[i+1];
         p2.y = p2.y - diffElementsArrow[i+1] + diffElementsLifting[i+1];
         
-        lines.push_back(viewer::Line3D("ContactWire", p1, p2, 255, 100, 50, 255));
+        lines.push_back(viewer::Line3D("ContactWire", p1, p2, 147, 51, 234, 255));
     }
     
     // Droppers
@@ -343,7 +343,7 @@ std::vector<viewer::Line3D> VaneBuilder::getAssemblyLines() const {
         math::Vec3 point2 = diffElementsPositions[idx];
         point2.y = point2.y + diffHeights[idx];
         
-        lines.push_back(viewer::Line3D("Dropper", point1, point2, 200, 200, 200, 255));
+        lines.push_back(viewer::Line3D("Dropper", point1, point2, 147, 51, 234, 255));
     }
     
     return lines;

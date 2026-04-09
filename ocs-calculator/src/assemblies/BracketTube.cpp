@@ -42,13 +42,17 @@ std::vector<TubeDimension> BracketTube::generateResults(const CantileverFrame& f
 
 std::vector<viewer::Line3D> BracketTube::getRenderLines() const {
     if (bottomIsolatorPoint.x == 0 && bottomIsolatorPoint.y == 0 && bottomIsolatorPoint.z == 0) return {};
-    
+
+    const double tubeR = params.tube.d / 2.0;
     std::vector<viewer::Line3D> lines;
-    // Green for bracket tube links
-    lines.push_back(viewer::Line3D("Bracket Tube", bottomPoleFixedPoint, bottomFixedPoint, 0, 228, 48, 255));
-    lines.push_back(viewer::Line3D("Bracket Tube", upperEyeClampClevisFixedPoint, stayTube->upperTubeEyeClampFixedPoint, 0, 228, 48, 255));
-    lines.push_back(viewer::Line3D("Bracket Tube", bottomFixedPoint, bottomIsolatorPoint, 0, 228, 48, 255));
-    lines.push_back(viewer::Line3D("Bracket Tube", bottomIsolatorPoint, upperEyeClampClevisFixedPoint, 0, 228, 48, 255));
+
+    // Fittings — rendered as lines (radius = 0)
+    lines.push_back(viewer::Line3D("Bracket Tube", bottomPoleFixedPoint, bottomFixedPoint,                             34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Bracket Tube", bottomFixedPoint, bottomIsolatorPoint,                              34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Bracket Tube", upperEyeClampClevisFixedPoint, stayTube->upperTubeEyeClampFixedPoint, 34, 197, 94, 255));
+
+    // Main tube body — rendered as 3D cylinder (radius > 0)
+    lines.push_back(viewer::Line3D("Bracket Tube", bottomIsolatorPoint, upperEyeClampClevisFixedPoint, 34, 197, 94, 255, tubeR));
 
     return lines;
 }

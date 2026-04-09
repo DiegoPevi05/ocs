@@ -37,11 +37,11 @@ std::vector<viewer::Line3D> Reinforcement::getRenderLines() const {
     
     std::vector<viewer::Line3D> lines;
     // Red for reinforcement links (255, 0, 0)
-    lines.push_back(viewer::Line3D("Reinforcement", upperEyeClampPoint, upperHookEndPoint, 255, 0, 0, 255));
-    lines.push_back(viewer::Line3D("Reinforcement", bottomEyeClampPoint, bottomHookEndPoint, 255, 0, 0, 255));
-    lines.push_back(viewer::Line3D("Reinforcement", upperHookEndPoint, upperFixedPoint, 255, 0, 0, 255));
-    lines.push_back(viewer::Line3D("Reinforcement", bottomFixedPoint, bottomHookEndPoint, 255, 0, 0, 255));
-    lines.push_back(viewer::Line3D("Reinforcement", upperFixedPoint, bottomFixedPoint, 255, 0, 0, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", upperEyeClampPoint, upperHookEndPoint, 34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", bottomEyeClampPoint, bottomHookEndPoint, 34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", upperHookEndPoint, upperFixedPoint, 34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", bottomFixedPoint, bottomHookEndPoint, 34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Reinforcement", upperFixedPoint, bottomFixedPoint, 34, 197, 94, 255));
 
     return lines;
 }

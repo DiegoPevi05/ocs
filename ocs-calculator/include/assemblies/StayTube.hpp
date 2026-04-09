@@ -27,6 +27,7 @@ public:
     // Core geometry outcomes expected by other arms
     math::Vec3 dir;
     math::Vec3 perp;
+    math::Vec3 upperPoleFixedPoint; // pole attachment point (stored for the missing-link segment)
     math::Vec3 upperFixedPoint;
     math::Vec3 upperTubeEyeClampTubeFixedPoint;
     math::Vec3 upperIsolatorPoint;

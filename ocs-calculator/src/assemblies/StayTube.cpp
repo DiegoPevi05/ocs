@@ -9,7 +9,9 @@ namespace assemblies {
 StayTube::StayTube(const StayTubeParams& params) : params(params) {}
 
 void StayTube::calculateGeometry(const CantileverFrame& frame) {
-    // Upper Fixed Point 
+    upperPoleFixedPoint = frame.upperPoleFixedPoint; // store for missing-link rendering
+
+    // Upper Fixed Point
     double ufpDistance = frame.getSwivelClevisUtilLength(params.swivel_bracket, params.swivel_clevis);
     upperFixedPoint = math::getPointFromDirection(frame.upperPoleFixedPoint, frame.directionPv, ufpDistance);
 
@@ -60,15 +62,22 @@ std::vector<TubeDimension> StayTube::generateResults(const CantileverFrame& fram
 
 std::vector<viewer::Line3D> StayTube::getRenderLines() const {
     if (upperIsolatorPoint.x == 0 && upperIsolatorPoint.y == 0 && upperIsolatorPoint.z == 0) return {};
-    
+
+    const double tubeR = params.tube.d / 2.0;
     std::vector<viewer::Line3D> lines;
-    // Blue for stay tube links
-    lines.push_back(viewer::Line3D("Stay Tube", upperIsolatorPoint, upperTubeEyeClampTubeFixedPoint, 0, 121, 241, 255));
-    lines.push_back(viewer::Line3D("Stay Tube", upperTubeEyeClampTubeFixedPoint, wireSupportFixedPoint, 0, 121, 241, 255));
-    lines.push_back(viewer::Line3D("Stay Tube", upperTubeEyeClampTubeFixedPoint, upperTubeEyeClampFixedPoint, 0, 121, 241, 255));
-    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPoint, upperTubeEndPoint, 0, 121, 241, 255));
-    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPoint, wireSupportStainlessSteelPoint, 0, 121, 241, 255));
-    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPointPpToMw, mwAxis, 0, 121, 241, 255));
+
+    // Missing link: pole attachment → tube start (swivel bracket + clevis + isolator fittings)
+    lines.push_back(viewer::Line3D("Stay Tube", upperPoleFixedPoint, upperIsolatorPoint, 34, 197, 94, 255));
+
+    // Main tube body segments — rendered as 3D cylinders (radius > 0)
+    lines.push_back(viewer::Line3D("Stay Tube", upperIsolatorPoint, upperTubeEyeClampTubeFixedPoint, 34, 197, 94, 255, tubeR));
+    lines.push_back(viewer::Line3D("Stay Tube", upperTubeEyeClampTubeFixedPoint, wireSupportFixedPoint,  34, 197, 94, 255, tubeR));
+    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPoint, upperTubeEndPoint,               34, 197, 94, 255, tubeR));
+
+    // Fittings / wires — rendered as lines (radius = 0)
+    lines.push_back(viewer::Line3D("Stay Tube", upperTubeEyeClampTubeFixedPoint, upperTubeEyeClampFixedPoint, 34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPoint, wireSupportStainlessSteelPoint,        34, 197, 94, 255));
+    lines.push_back(viewer::Line3D("Stay Tube", wireSupportFixedPointPpToMw, mwAxis,                          34, 197, 94, 255));
 
     return lines;
 }

@@ -29,7 +29,8 @@ json line3dToJson(const viewer::Line3D& line) {
         {"name", line.name},
         {"start", vec3ToJson(line.start)},
         {"end", vec3ToJson(line.end)},
-        {"color", json::array({line.r, line.g, line.b, line.a})}
+        {"color", json::array({line.r, line.g, line.b, line.a})},
+        {"radius", line.radius}
     };
 }
 

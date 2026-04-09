@@ -930,19 +930,46 @@ export class ViewerEngine {
     this.fitCamera();
   }
 
-  private makeApiLine(apiLine: ApiLine): THREE.Line {
-    const color = rgbaToHex(apiLine.color);
+  private makeApiLine(apiLine: ApiLine): THREE.Object3D {
     // Calculator Z axis is opposite to viewer Z axis — negate Z when mapping.
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]),
-      new THREE.Vector3(apiLine.end[0], apiLine.end[1], -apiLine.end[2]),
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color });
-    const line = new THREE.Line(geo, mat);
-    line.name = apiLine.name;
-    line.userData.apiLine = apiLine;
-    line.layers.set(2);
-    return line;
+    const start = new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]);
+    const end   = new THREE.Vector3(apiLine.end[0],   apiLine.end[1],   -apiLine.end[2]);
+    const color = rgbaToHex(apiLine.color);
+
+    let obj: THREE.Object3D;
+    if (apiLine.radius && apiLine.radius > 0) {
+      // Render as a 3D cylinder tube
+      const length = start.distanceTo(end);
+      if (length < 1) {
+        // degenerate segment — fall back to line
+        const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+        obj = new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
+      } else {
+        const geo = new THREE.CylinderGeometry(apiLine.radius, apiLine.radius, length, 8);
+        const mat = new THREE.MeshPhongMaterial({ color });
+        const mesh = new THREE.Mesh(geo, mat);
+        // Position at midpoint, rotate to align with segment direction
+        const mid = start.clone().add(end).multiplyScalar(0.5);
+        mesh.position.copy(mid);
+        const dir = end.clone().sub(start).normalize();
+        const up  = new THREE.Vector3(0, 1, 0);
+        const axis = new THREE.Vector3().crossVectors(up, dir);
+        if (axis.length() > 1e-6) {
+          mesh.quaternion.setFromAxisAngle(axis.normalize(), Math.acos(up.dot(dir)));
+        } else if (up.dot(dir) < 0) {
+          mesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+        }
+        obj = mesh;
+      }
+    } else {
+      const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+      obj = new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
+    }
+
+    obj.name = apiLine.name;
+    obj.userData.apiLine = apiLine;
+    obj.layers.set(2);
+    return obj;
   }
 
   // ─── Dynamic UI Objects ───────────────────────────────────────────────────────

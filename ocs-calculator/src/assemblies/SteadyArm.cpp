@@ -184,28 +184,33 @@ std::vector<TubeDimension> SteadyArm::generateResults(const CantileverFrame& fra
 
 std::vector<viewer::Line3D> SteadyArm::getRenderLines() const {
     if (fixedPoint.empty() && endPoint.empty()) return {};
+    const double tubeR = params.tube.d / 2.0;
     std::vector<viewer::Line3D> lines;
     if (components::isSba(config)) {
         if (!fixedPoint.empty()) {
-            if (!points.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], points[0], 255, 121, 0, 255));
-            if (!endPoint.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], endPoint[0], 255, 121, 0, 255));
-            lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], eyeClampPoint, 255, 121, 0, 255));
+            if (!points.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], points[0], 34, 197, 94, 255));
+            // Main tube body
+            if (!endPoint.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], endPoint[0], 34, 197, 94, 255, tubeR));
+            // Fittings
+            lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], eyeClampPoint, 34, 197, 94, 255));
         }
-        lines.push_back(viewer::Line3D("Steady Arm", hookEndFittingPoint, eyeClampPoint, 255, 121, 0, 255));
-        lines.push_back(viewer::Line3D("Steady Arm", eyeClampPoint, eyeClampFixedPoint, 255, 121, 0, 255));
-        lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 255, 121, 0, 255));
-        lines.push_back(viewer::Line3D("Steady Arm", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 255, 121, 0, 255));
-        if (contactWireConfig == components::ContactWireConfiguration::DOUBLE && fixedPoint.size() > 1 && points.size() > 1) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[1], points[1], 255, 121, 0, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", hookEndFittingPoint, eyeClampPoint, 34, 197, 94, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", eyeClampPoint, eyeClampFixedPoint, 34, 197, 94, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
+        lines.push_back(viewer::Line3D("Steady Arm", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 34, 197, 94, 255));
+        if (contactWireConfig == components::ContactWireConfiguration::DOUBLE && fixedPoint.size() > 1 && points.size() > 1) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[1], points[1], 34, 197, 94, 255));
     } else {
         if (!yAxisCwPoint.empty() && !points.empty()) {
-            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], points[0], 255, 121, 0, 255));
-            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], fixedPoint[0], 255, 121, 0, 255));
+            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], points[0], 34, 197, 94, 255));
+            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], fixedPoint[0], 34, 197, 94, 255));
         }
         if (!hookClampPoint.empty() && !fixedPoint.empty()) {
-            lines.push_back(viewer::Line3D("Steady Arm", hookClampPoint[0], fixedPoint[0], 255, 121, 0, 255));
+            // Main tube body: CW clamp → bracket connection
+            lines.push_back(viewer::Line3D("Steady Arm", hookClampPoint[0], fixedPoint[0], 34, 197, 94, 255, tubeR));
+            // Fittings
             if (!hookClampIntersectionSupport.empty()) {
-                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookClampPoint[0], 255, 121, 0, 255));
-                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookFixedPoint[0], 255, 121, 0, 255));
+                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookClampPoint[0], 34, 197, 94, 255));
+                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookFixedPoint[0], 34, 197, 94, 255));
             }
         }
     }

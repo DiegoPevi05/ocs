@@ -7,6 +7,7 @@ export interface ApiLine {
   end: [number, number, number];   // [x, y, z]
   name: string;
   start: [number, number, number]; // [x, y, z]
+  radius?: number;                 // >0 = outer radius mm → render as 3D cylinder; 0/absent = wire line
 }
 
 export interface ApiResult {

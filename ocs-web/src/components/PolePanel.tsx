@@ -137,6 +137,90 @@ export function PolePanel({ pole, onSave, onClose }: Props) {
             </Field>
           </Row>
 
+          <Divider label="Structural & Profile Properties" />
+
+          <Field label="Profile Type">
+            <select
+              value={form.profileType ?? 'CUSTOM'}
+              onChange={e => {
+                const pt = e.target.value;
+                if (pt === 'CUSTOM') {
+                  set('profileType', pt);
+                } else {
+                  const w = 160; const h = 160; const tf = 13; const tw = 8;
+                  const density = 7850;
+                  let A=0, Ix=0, Iy=0;
+                  if (pt === 'SQUARE_HOLE') {
+                    const ts = 5;
+                    const iW = w - 2*ts; const iH = h - 2*ts;
+                    A = w*h - iW*iH;
+                    Ix = (w*Math.pow(h,3) - iW*Math.pow(iH,3))/12;
+                    Iy = (h*Math.pow(w,3) - iH*Math.pow(iW,3))/12;
+                  } else if (pt === 'CIRCLE_HOLE') {
+                    const rO = w/2; const rI = w/2 - 5;
+                    A = Math.PI*(rO*rO - rI*rI);
+                    Ix = (Math.PI/4)*(Math.pow(rO,4) - Math.pow(rI,4)); Iy = Ix;
+                  } else if (pt === 'T_PROFILE') {
+                    const As = w*tf; const Aw = tw*(h-tf);
+                    A = As + Aw;
+                    const yC = (tw*(h-tf)*((h-tf)/2) + w*tf*(h-tf/2))/A;
+                    Ix = (w*Math.pow(tf,3)/12) + As*Math.pow(h-tf/2-yC,2) + (tw*Math.pow(h-tf,3)/12) + Aw*Math.pow((h-tf)/2-yC,2);
+                    Iy = (tf*Math.pow(w,3)/12) + ((h-tf)*Math.pow(tw,3)/12);
+                  } else if (pt === 'DOUBLE_T') {
+                    const iH = h - 2*tf;
+                    A = 2*(w*tf) + iH*tw;
+                    Ix = (w*Math.pow(h,3) - (w-tw)*Math.pow(iH,3))/12;
+                    Iy = (2*tf*Math.pow(w,3) + iH*Math.pow(tw,3))/12;
+                  }
+                  setForm(f => ({
+                    ...f, profileType: pt, density,
+                    width: w, length: h,
+                    crossAreaZ: Math.round(A), crossAreaX: h, crossAreaY: w,
+                    inertiaX: Math.round(Ix), inertiaY: Math.round(Iy), inertiaZ: Math.round(Ix + Iy),
+                  }));
+                }
+              }}
+              style={INPUT}
+            >
+              <option value="CUSTOM">Custom / Override</option>
+              <option value="SQUARE_HOLE">Square (Hollow)</option>
+              <option value="CIRCLE_HOLE">Circle (Hollow)</option>
+              <option value="T_PROFILE">T-Profile</option>
+              <option value="DOUBLE_T">Double-T (I-Beam)</option>
+            </select>
+          </Field>
+
+          {/* Cross-section dimensions */}
+          <Row>
+            <Field label="Width (mm)" hint={form.profileType !== 'CUSTOM' ? 'Set by profile' : undefined}>
+              <input
+                type="number" value={form.width ?? ''}
+                onChange={e => set('width', +e.target.value)}
+                disabled={form.profileType !== 'CUSTOM' && !!form.profileType}
+                style={{ ...INPUT, opacity: (form.profileType !== 'CUSTOM' && !!form.profileType) ? 0.45 : 1 }}
+              />
+            </Field>
+            <Field label="Length (mm)" hint={form.profileType !== 'CUSTOM' ? 'Set by profile' : undefined}>
+              <input
+                type="number" value={form.length ?? ''}
+                onChange={e => set('length', +e.target.value)}
+                disabled={form.profileType !== 'CUSTOM' && !!form.profileType}
+                style={{ ...INPUT, opacity: (form.profileType !== 'CUSTOM' && !!form.profileType) ? 0.45 : 1 }}
+              />
+            </Field>
+          </Row>
+
+          <Row>
+            <Field label="Density (kg/m³)"><input type="number" value={form.density ?? ''} onChange={e => set('density', +e.target.value)} style={INPUT} /></Field>
+            <Field label="Cross Area Z (mm²)"><input type="number" value={form.crossAreaZ ?? ''} onChange={e => set('crossAreaZ', +e.target.value)} style={INPUT} /></Field>
+          </Row>
+
+          <Row>
+            <Field label="Inertia X (mm⁴)"><input type="number" value={form.inertiaX ?? ''} onChange={e => set('inertiaX', +e.target.value)} style={INPUT} /></Field>
+            <Field label="Inertia Y (mm⁴)"><input type="number" value={form.inertiaY ?? ''} onChange={e => set('inertiaY', +e.target.value)} style={INPUT} /></Field>
+            <Field label="Inertia Z (mm⁴)"><input type="number" value={form.inertiaZ ?? ''} onChange={e => set('inertiaZ', +e.target.value)} style={INPUT} /></Field>
+          </Row>
+
         </div>
 
         {/* ── Footer ── */}

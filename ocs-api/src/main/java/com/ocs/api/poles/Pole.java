@@ -38,4 +38,17 @@ public class Pole extends BaseEntity {
 
     private Integer cantileversQuantity;
     private Double catSeparation;
+
+    // Structural & Profile Properties
+    private Double height;
+    private Double density;
+    private Double inertiaX;
+    private Double inertiaY;
+    private Double inertiaZ;
+    private Double crossAreaX;
+    private Double crossAreaY;
+    private Double crossAreaZ;
+    private String profileType;
+    private Double width;    // cross-section width mm
+    private Double length;   // cross-section depth mm
 }

@@ -47,6 +47,18 @@ export interface PoleData {
   id?: string; label?: string; x: number; z: number; y?: number; h?: number;
   cantileversQuantity?: number;  // how many catenary wires on this pole, default 1
   catSeparation?: number;        // vertical separation between catenary wires mm, default 720
+  
+  // Physical & Profile Properties
+  density?: number;
+  inertiaX?: number;
+  inertiaY?: number;
+  inertiaZ?: number;
+  crossAreaX?: number;
+  crossAreaY?: number;
+  crossAreaZ?: number;
+  profileType?: 'SQUARE_HOLE' | 'CIRCLE_HOLE' | 'T_PROFILE' | 'DOUBLE_T' | 'CUSTOM' | string;
+  width?: number;   // cross-section width mm (editable for CUSTOM, calculated for others)
+  length?: number;  // cross-section depth mm (editable for CUSTOM, calculated for others)
 }
 export interface CantileverData {
   id?: string; label?: string;

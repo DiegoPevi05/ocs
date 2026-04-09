@@ -9,3 +9,7 @@ databaseChangeLog:
       file: db/migrations/v0004_memberships_updated_at.sql
   - include:
       file: db/migrations/v0005_cantilever_params.sql
+  - include:
+      file: db/migrations/v0006_pole_profile_props.sql
+  - include:
+      file: db/migrations/v0007_pole_dimensions.sql

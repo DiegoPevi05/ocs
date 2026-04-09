@@ -1304,15 +1304,33 @@ export class ViewerEngine {
       mesh2d.layers.set(1);
       this.dynamicGroup.add(mesh2d);
 
-      // 3D representation (tall cylinder)
-      const height = p.h || 3000;
-      const cylGeo = new THREE.CylinderGeometry(150, 150, height, 16);
-      cylGeo.translate(0, height / 2, 0); // move pivot to bottom
-      const cylMat = new THREE.MeshPhongMaterial({ color: poleColor });
-      const cyl = new THREE.Mesh(cylGeo, cylMat);
-      cyl.position.set(p.x, p.y || 0, p.z);
-      cyl.layers.set(2);
-      this.dynamicGroup.add(cyl);
+      // 3D representation — shape depends on profileType
+      const poleH = p.h || 3000;
+      const poleW = p.width || 160;
+      const poleL = p.length || 160;
+      let mesh3d: THREE.Mesh;
+      if (p.profileType === 'CIRCLE_HOLE') {
+        const geo = new THREE.CylinderGeometry(poleW / 2, poleW / 2, poleH, 24);
+        geo.translate(0, poleH / 2, 0);
+        mesh3d = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: poleColor }));
+      } else if (
+        p.profileType === 'SQUARE_HOLE' ||
+        p.profileType === 'T_PROFILE' ||
+        p.profileType === 'DOUBLE_T' ||
+        p.profileType === 'CUSTOM'
+      ) {
+        const geo = new THREE.BoxGeometry(poleW, poleH, poleL);
+        geo.translate(0, poleH / 2, 0);
+        mesh3d = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: poleColor }));
+      } else {
+        // default: cylinder
+        const geo = new THREE.CylinderGeometry(150, 150, poleH, 16);
+        geo.translate(0, poleH / 2, 0);
+        mesh3d = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: poleColor }));
+      }
+      mesh3d.position.set(p.x, p.y || 0, p.z);
+      mesh3d.layers.set(2);
+      this.dynamicGroup.add(mesh3d);
     });
 
     // Render committed cantilevers

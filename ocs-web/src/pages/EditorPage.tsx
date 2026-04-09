@@ -423,6 +423,8 @@ export default function EditorPage() {
           trackGauge: c.trackGauge ?? 1435,
           cantileversQuantity: matchPole?.cantileversQuantity ?? 1,
           catSeparation: matchPole?.catSeparation ?? 720,
+          poleWidth: matchPole?.width ?? 300,
+          poleLength: matchPole?.length ?? 300,
           steadyArmAlpha: c.steadyArmAlpha ?? -2,
           registerArmAlpha: c.registerArmAlpha ?? 2,
           steadyArmLength: c.steadyArmLength ?? 1200,
@@ -442,14 +444,17 @@ export default function EditorPage() {
       if (!c1 || !c2) return;
       const cwH1 = c1.contactWireHeight ?? 5400;
       const sysH1 = c1.systemHeight ?? 1000;
+      const cwo1 = c1.contactWireVerticalOffset ?? 120;
       const cwH2 = c2.contactWireHeight ?? 5400;
       const sysH2 = c2.systemHeight ?? 1000;
+      const cwo2 = c2.contactWireVerticalOffset ?? 120;
+      // cwAxis.y = contactWireHeight + contactWireVerticalOffset (invert(viaDir) = up)
       const payload = {
         _vaneIdx: vIdx,
-        cw_start: [c1.x2, cwH1, -c1.z2],
-        sw_start: [c1.x2, cwH1 + sysH1, -c1.z2],
-        cw_end: [c2.x2, cwH2, -c2.z2],
-        sw_end: [c2.x2, cwH2 + sysH2, -c2.z2],
+        cw_start: [c1.x2, cwH1 + cwo1, -c1.z2],
+        sw_start: [c1.x2, cwH1 + cwo1 + sysH1, -c1.z2],
+        cw_end: [c2.x2, cwH2 + cwo2, -c2.z2],
+        sw_end: [c2.x2, cwH2 + cwo2 + sysH2, -c2.z2],
         qty_droppers: v.qtyDroppers ?? 0,
         initial_separation: v.initialSeparation ?? 5000,
         step_size: 500,  // fixed 500mm rendering grid for smooth wire curves

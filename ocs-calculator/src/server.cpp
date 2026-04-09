@@ -67,7 +67,9 @@ components::ConfigurationType getConfigType(const std::string& type) {
 json buildCantileversLogic(const json& j, double& calcTimeMs) {
     std::string configType = j.value("configuration", "TDP>2.2");
     components::ModelInterface model = { { getConfigType(configType), components::ContactWireConfiguration::SINGLE } };
-    components::PoleModel poleModel = { { 300.0 } };
+    double poleWidth  = j.value("poleWidth",  300.0);  // along-track
+    double poleLength = j.value("poleLength", 300.0);  // perpendicular-to-track (face toward arm)
+    components::PoleModel poleModel = { { poleWidth, poleLength } };
     
     math::Vec3 polePos = {0.0, 0.0, 0.0};
     if (j.contains("polePosition")) {

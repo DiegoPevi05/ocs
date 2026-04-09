@@ -9,7 +9,7 @@ Pole3D::Pole3D(const std::optional<components::PoleProperties>& poleProps, compo
         model = poleProps->model;
         globalPosition = {poleProps->position.x, poleProps->position.y, poleProps->position.z};
     } else {
-        model = { {300.0} }; // Default
+        model = { {300.0, 300.0} }; // Default: 300mm width (along-track), 300mm length (to-track)
         globalPosition = {0, 0, 0};
     }
 }
@@ -41,7 +41,8 @@ math::Vec3 Pole3D::getDirectionToPv(const math::Vec3& globalPv) const {
 
 math::Vec3 Pole3D::getBottomFixedPoint(double bottomFixedHeight, double supportOffset, const math::Vec3& directionPv) const {
     math::Vec3 newPoleHeightModified = { polePosition.x, polePosition.y + bottomFixedHeight, polePosition.z };
-    double distance = supportOffset + model.measures.width / 2.0;
+    // length is the pole dimension in the directionPv direction (perpendicular to track, facing the arm)
+    double distance = supportOffset + model.measures.length / 2.0;
     return math::getPointFromDirection(newPoleHeightModified, directionPv, distance);
 }
 

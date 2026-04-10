@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { PoleData } from '../types';
+import type { PoleData, ProjectSettings } from '../types';
+import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
 // ─── Shared style tokens ──────────────────────────────────────────────────────
 
@@ -47,19 +48,78 @@ function Divider({ label }: { label: string }) {
   );
 }
 
+// ─── Section property calculator ──────────────────────────────────────────────
+
+function calcSectionProps(profileType: string, width: number, length: number, thickness: number) {
+  const w = width, h = length, ts = thickness;
+  const tf = 13, tw = 8; // fixed flange / web thickness for T profiles
+  let A = 0, Ix = 0, Iy = 0;
+
+  if (profileType === 'SQUARE_HOLE') {
+    const iW = w - 2 * ts, iH = h - 2 * ts;
+    if (iW > 0 && iH > 0) {
+      A = w * h - iW * iH;
+      Ix = (w * Math.pow(h, 3) - iW * Math.pow(iH, 3)) / 12;
+      Iy = (h * Math.pow(w, 3) - iH * Math.pow(iW, 3)) / 12;
+    }
+  } else if (profileType === 'CIRCLE_HOLE') {
+    const rO = w / 2, rI = w / 2 - ts;
+    if (rI > 0) {
+      A = Math.PI * (rO * rO - rI * rI);
+      Ix = (Math.PI / 4) * (Math.pow(rO, 4) - Math.pow(rI, 4));
+      Iy = Ix;
+    }
+  } else if (profileType === 'T_PROFILE') {
+    const As = w * tf, Aw = tw * (h - tf);
+    A = As + Aw;
+    if (A > 0) {
+      const yC = (tw * (h - tf) * ((h - tf) / 2) + w * tf * (h - tf / 2)) / A;
+      Ix = (w * Math.pow(tf, 3) / 12) + As * Math.pow(h - tf / 2 - yC, 2)
+        + (tw * Math.pow(h - tf, 3) / 12) + Aw * Math.pow((h - tf) / 2 - yC, 2);
+      Iy = (tf * Math.pow(w, 3) / 12) + ((h - tf) * Math.pow(tw, 3) / 12);
+    }
+  } else if (profileType === 'DOUBLE_T') {
+    const iH = h - 2 * tf;
+    A = 2 * (w * tf) + iH * tw;
+    Ix = (w * Math.pow(h, 3) - (w - tw) * Math.pow(iH, 3)) / 12;
+    Iy = (2 * tf * Math.pow(w, 3) + iH * Math.pow(tw, 3)) / 12;
+  }
+
+  return { A: Math.round(A), Ix: Math.round(Ix), Iy: Math.round(Iy) };
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
   pole: PoleData;
+  settings?: ProjectSettings;
   onSave: (updated: PoleData) => void;
   onClose: () => void;
 }
 
-export function PolePanel({ pole, onSave, onClose }: Props) {
+export function PolePanel({ pole, settings, onSave, onClose }: Props) {
+  const s = settings ?? DEFAULT_PROJECT_SETTINGS;
   const [form, setForm] = useState<PoleData>({ ...pole });
 
   const set = <K extends keyof PoleData>(key: K, val: PoleData[K]) =>
     setForm(f => ({ ...f, [key]: val }));
+
+  /** Re-compute section properties from current form dimensions. */
+  const recompute = (pt: string, w: number, h: number, ts: number) => {
+    const { A, Ix, Iy } = calcSectionProps(pt, w, h, ts);
+    setForm(f => ({
+      ...f,
+      crossAreaZ: A,
+      crossAreaX: h,
+      crossAreaY: w,
+      inertiaX: Ix,
+      inertiaY: Iy,
+      inertiaZ: Math.round(Ix + Iy),
+    }));
+  };
+
+  const isAutoCalc = !!form.profileType && form.profileType !== 'CUSTOM';
+  const isHollow = form.profileType === 'SQUARE_HOLE' || form.profileType === 'CIRCLE_HOLE';
 
   return (
     <>
@@ -120,7 +180,7 @@ export function PolePanel({ pole, onSave, onClose }: Props) {
 
           {/* Height */}
           <Field label="Height (mm)">
-            <input type="number" value={form.h ?? 3000}
+            <input type="number" value={form.h ?? s.pole.height}
               onChange={e => set('h', +e.target.value)} style={INPUT} />
           </Field>
 
@@ -147,36 +207,31 @@ export function PolePanel({ pole, onSave, onClose }: Props) {
                 if (pt === 'CUSTOM') {
                   set('profileType', pt);
                 } else {
-                  const w = 160; const h = 160; const tf = 13; const tw = 8;
-                  const density = 7850;
-                  let A=0, Ix=0, Iy=0;
+                  // Pick default dimensions from project settings
+                  let w = 160, h = 160, ts = 5;
                   if (pt === 'SQUARE_HOLE') {
-                    const ts = 5;
-                    const iW = w - 2*ts; const iH = h - 2*ts;
-                    A = w*h - iW*iH;
-                    Ix = (w*Math.pow(h,3) - iW*Math.pow(iH,3))/12;
-                    Iy = (h*Math.pow(w,3) - iH*Math.pow(iW,3))/12;
+                    w = s.pole.squareHollowWidth;
+                    h = s.pole.squareHollowLength;
+                    ts = s.pole.squareHollowThickness;
                   } else if (pt === 'CIRCLE_HOLE') {
-                    const rO = w/2; const rI = w/2 - 5;
-                    A = Math.PI*(rO*rO - rI*rI);
-                    Ix = (Math.PI/4)*(Math.pow(rO,4) - Math.pow(rI,4)); Iy = Ix;
-                  } else if (pt === 'T_PROFILE') {
-                    const As = w*tf; const Aw = tw*(h-tf);
-                    A = As + Aw;
-                    const yC = (tw*(h-tf)*((h-tf)/2) + w*tf*(h-tf/2))/A;
-                    Ix = (w*Math.pow(tf,3)/12) + As*Math.pow(h-tf/2-yC,2) + (tw*Math.pow(h-tf,3)/12) + Aw*Math.pow((h-tf)/2-yC,2);
-                    Iy = (tf*Math.pow(w,3)/12) + ((h-tf)*Math.pow(tw,3)/12);
-                  } else if (pt === 'DOUBLE_T') {
-                    const iH = h - 2*tf;
-                    A = 2*(w*tf) + iH*tw;
-                    Ix = (w*Math.pow(h,3) - (w-tw)*Math.pow(iH,3))/12;
-                    Iy = (2*tf*Math.pow(w,3) + iH*Math.pow(tw,3))/12;
+                    w = s.pole.circleHollowDiameter;
+                    ts = s.pole.circleHollowThickness;
+                    h = ts; // not used for circle, but set length = thickness for display
                   }
+                  const { A, Ix, Iy } = calcSectionProps(pt, w, h, ts);
                   setForm(f => ({
-                    ...f, profileType: pt, density,
-                    width: w, length: h,
-                    crossAreaZ: Math.round(A), crossAreaX: h, crossAreaY: w,
-                    inertiaX: Math.round(Ix), inertiaY: Math.round(Iy), inertiaZ: Math.round(Ix + Iy),
+                    ...f,
+                    profileType: pt,
+                    density: 7850,
+                    width: w,
+                    length: pt === 'CIRCLE_HOLE' ? ts : h,
+                    sectionThickness: ts,
+                    crossAreaZ: A,
+                    crossAreaX: h,
+                    crossAreaY: w,
+                    inertiaX: Ix,
+                    inertiaY: Iy,
+                    inertiaZ: Math.round(Ix + Iy),
                   }));
                 }
               }}
@@ -190,36 +245,96 @@ export function PolePanel({ pole, onSave, onClose }: Props) {
             </select>
           </Field>
 
-          {/* Cross-section dimensions */}
+          {/* Cross-section dimensions — always editable; auto-calc triggers for non-CUSTOM */}
           <Row>
-            <Field label="Width (mm)" hint={form.profileType !== 'CUSTOM' ? 'Set by profile' : undefined}>
+            <Field
+              label={form.profileType === 'CIRCLE_HOLE' ? 'Diameter (mm)' : 'Width (mm)'}
+              hint={isAutoCalc ? 'Edits auto-recalculate properties' : undefined}
+            >
               <input
-                type="number" value={form.width ?? ''}
-                onChange={e => set('width', +e.target.value)}
-                disabled={form.profileType !== 'CUSTOM' && !!form.profileType}
-                style={{ ...INPUT, opacity: (form.profileType !== 'CUSTOM' && !!form.profileType) ? 0.45 : 1 }}
+                type="number"
+                value={form.width ?? ''}
+                onChange={e => {
+                  const w = +e.target.value;
+                  set('width', w);
+                  if (isAutoCalc) {
+                    const h = form.profileType === 'CIRCLE_HOLE'
+                      ? (form.sectionThickness ?? 5)
+                      : (form.length ?? 160);
+                    recompute(form.profileType!, w, h, form.sectionThickness ?? 5);
+                  }
+                }}
+                style={INPUT}
               />
             </Field>
-            <Field label="Length (mm)" hint={form.profileType !== 'CUSTOM' ? 'Set by profile' : undefined}>
-              <input
-                type="number" value={form.length ?? ''}
-                onChange={e => set('length', +e.target.value)}
-                disabled={form.profileType !== 'CUSTOM' && !!form.profileType}
-                style={{ ...INPUT, opacity: (form.profileType !== 'CUSTOM' && !!form.profileType) ? 0.45 : 1 }}
-              />
+            {form.profileType !== 'CIRCLE_HOLE' && (
+              <Field label="Length (mm)" hint={isAutoCalc ? 'Edits auto-recalculate properties' : undefined}>
+                <input
+                  type="number"
+                  value={form.length ?? ''}
+                  onChange={e => {
+                    const h = +e.target.value;
+                    set('length', h);
+                    if (isAutoCalc) {
+                      recompute(form.profileType!, form.width ?? 160, h, form.sectionThickness ?? 5);
+                    }
+                  }}
+                  style={INPUT}
+                />
+              </Field>
+            )}
+          </Row>
+
+          {/* Wall thickness — only for hollow sections */}
+          {isHollow && (
+            <Row>
+              <Field label="Wall Thickness (mm)" hint="Edits auto-recalculate properties">
+                <input
+                  type="number"
+                  value={form.sectionThickness ?? 5}
+                  onChange={e => {
+                    const ts = +e.target.value;
+                    set('sectionThickness', ts);
+                    const w = form.width ?? 160;
+                    const h = form.profileType === 'CIRCLE_HOLE' ? ts : (form.length ?? 160);
+                    recompute(form.profileType!, w, h, ts);
+                  }}
+                  style={INPUT}
+                />
+              </Field>
+            </Row>
+          )}
+
+          <Row>
+            <Field label="Density (kg/m³)">
+              <input type="number" value={form.density ?? ''} onChange={e => set('density', +e.target.value)} style={INPUT} />
+            </Field>
+            <Field label="Cross Area Z (mm²)" hint={isAutoCalc ? 'Auto' : undefined}>
+              <input type="number" value={form.crossAreaZ ?? ''} onChange={e => set('crossAreaZ', +e.target.value)}
+                style={{ ...INPUT, borderColor: isAutoCalc ? '#1e3a5f' : '#1e2d45' }} />
             </Field>
           </Row>
 
           <Row>
-            <Field label="Density (kg/m³)"><input type="number" value={form.density ?? ''} onChange={e => set('density', +e.target.value)} style={INPUT} /></Field>
-            <Field label="Cross Area Z (mm²)"><input type="number" value={form.crossAreaZ ?? ''} onChange={e => set('crossAreaZ', +e.target.value)} style={INPUT} /></Field>
+            <Field label="Inertia X (mm⁴)" hint={isAutoCalc ? 'Auto' : undefined}>
+              <input type="number" value={form.inertiaX ?? ''} onChange={e => set('inertiaX', +e.target.value)}
+                style={{ ...INPUT, borderColor: isAutoCalc ? '#1e3a5f' : '#1e2d45' }} />
+            </Field>
+            <Field label="Inertia Y (mm⁴)" hint={isAutoCalc ? 'Auto' : undefined}>
+              <input type="number" value={form.inertiaY ?? ''} onChange={e => set('inertiaY', +e.target.value)}
+                style={{ ...INPUT, borderColor: isAutoCalc ? '#1e3a5f' : '#1e2d45' }} />
+            </Field>
+            <Field label="Inertia Z (mm⁴)" hint={isAutoCalc ? 'Auto' : undefined}>
+              <input type="number" value={form.inertiaZ ?? ''} onChange={e => set('inertiaZ', +e.target.value)}
+                style={{ ...INPUT, borderColor: isAutoCalc ? '#1e3a5f' : '#1e2d45' }} />
+            </Field>
           </Row>
 
-          <Row>
-            <Field label="Inertia X (mm⁴)"><input type="number" value={form.inertiaX ?? ''} onChange={e => set('inertiaX', +e.target.value)} style={INPUT} /></Field>
-            <Field label="Inertia Y (mm⁴)"><input type="number" value={form.inertiaY ?? ''} onChange={e => set('inertiaY', +e.target.value)} style={INPUT} /></Field>
-            <Field label="Inertia Z (mm⁴)"><input type="number" value={form.inertiaZ ?? ''} onChange={e => set('inertiaZ', +e.target.value)} style={INPUT} /></Field>
-          </Row>
+          {isAutoCalc && (
+            <div style={{ fontSize: 10, color: '#334155', borderTop: '1px solid #1e2d45', paddingTop: 6 }}>
+              Blue-bordered fields are auto-calculated from dimensions. You can still override them directly.
+            </div>
+          )}
 
         </div>
 

@@ -13,6 +13,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "projects")
@@ -28,6 +30,10 @@ public class Project extends BaseEntity {
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "settings", columnDefinition = "jsonb")
+    private String settings;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by")

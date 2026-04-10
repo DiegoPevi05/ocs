@@ -3,14 +3,18 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   MousePointer2, Minus, CircleDot, GitMerge, Link2,
   Box, Square, RotateCcw, ArrowLeft, Save, FileDown,
+  Anchor, Layout,
 } from 'lucide-react';
 import { Client as StompClient } from '@stomp/stompjs';
 import { ViewerEngine } from '../viewer/ViewerEngine';
-import { api, parseSceneData } from '../lib/api';
+import { api, parseSceneData, parseProjectSettings } from '../lib/api';
 import { CantileverPanel } from '../components/CantileverPanel';
 import { VanePanel } from '../components/VanePanel';
 import { PolePanel } from '../components/PolePanel';
-import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse, PoleData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry } from '../types';
+import { AnchorPointPanel } from '../components/AnchorPointPanel';
+import { AnchorPanel } from '../components/AnchorPanel';
+import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
+import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +84,7 @@ const ROW = { display: 'flex', gap: 10, marginTop: 8 } as const;
 // ─── ToolButton ───────────────────────────────────────────────────────────────
 
 function ToolButton({ icon, label, active, disabled, title, onClick }: {
-  icon: React.ReactNode; label: string; active?: boolean; disabled?: boolean; title?: string; onClick: () => void;
+  icon: React.ReactNode; label: string; active?: boolean; disabled?: boolean; title?: string; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button className={`tool-btn${active ? ' tool-btn--active' : ''}${disabled ? ' tool-btn--disabled' : ''}`} onClick={onClick} title={title ?? label} disabled={disabled}>
@@ -128,6 +132,20 @@ export default function EditorPage() {
   const [trackMode, setTrackMode] = useState<'rect' | 'poly'>('rect');
   const [autoSnap, setAutoSnap] = useState(true);
 
+  // Filter dropdown state
+  const [showSelectFilter, setShowSelectFilter] = useState(false);
+  const selectFilterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showSelectFilter && selectFilterRef.current && !selectFilterRef.current.contains(e.target as Node)) {
+        setShowSelectFilter(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showSelectFilter]);
+
   // Drawing state
   const [completedTracks, setCompletedTracks] = useState<{ x: number; z: number; y?: number; r?: number; label?: string }[][]>([]);
   const [trackPoints, setTrackPoints] = useState<{ x: number; z: number; y?: number; r?: number }[]>([]);
@@ -135,13 +153,18 @@ export default function EditorPage() {
   const [cantilevers, setCantilevers] = useState<CantileverData[]>([]);
   const [vanes, setVanes] = useState<VaneData[]>([]);
   const [vaneFirstCantIdx, setVaneFirstCantIdx] = useState<number | null>(null);
+  const [anchorPoints, setAnchorPoints] = useState<AnchorPointData[]>([]);
+  const [anchors, setAnchors] = useState<AnchorData[]>([]);
+  const [anchorFirstPoleIdx, setAnchorFirstPoleIdx] = useState<number | null>(null);
 
   // Selection
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
   const [selectedPoles, setSelectedPoles] = useState<number[]>([]);
   const [selectedCantilevers, setSelectedCantilevers] = useState<number[]>([]);
   const [selectedVanes, setSelectedVanes] = useState<number[]>([]);
-  const [selFilter, setSelFilter] = useState({ tracks: true, poles: true, cantilevers: true, vanes: true });
+  const [selectedAnchorPoints, setSelectedAnchorPoints] = useState<number[]>([]);
+  const [selectedAnchors, setSelectedAnchors] = useState<number[]>([]);
+  const [selFilter, setSelFilter] = useState({ tracks: true, poles: true, cantilevers: true, vanes: true, anchorPoints: true, anchors: true });
 
   // Creation modals
   const [poleModal, setPoleModal] = useState<{ x: number; z: number; y: number } | null>(null);
@@ -149,10 +172,18 @@ export default function EditorPage() {
   const [cantileverModal, setCantileverModal] = useState<{ x1: number; z1: number; x2raw: number; z2raw: number; tx: number; tz: number } | null>(null);
   const [vaneModal, setVaneModal] = useState<{ x1: number; z1: number; x2: number; z2: number } | null>(null);
 
+  // Creation/edit modals
+  const [anchorPointModal, setAnchorPointModal] = useState<AnchorPointData | null>(null);
+  const [editAnchorPointIdx, setEditAnchorPointIdx] = useState<number | null>(null);
+  const [editAnchorIdx, setEditAnchorIdx] = useState<number | null>(null);
+
   // Edit modals
   const [editPoleIdx, setEditPoleIdx] = useState<number | null>(null);
   const [editCantileverIdx, setEditCantileverIdx] = useState<number | null>(null);
   const [editVaneIdx, setEditVaneIdx] = useState<number | null>(null);
+
+  // Project-level defaults
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>(DEFAULT_PROJECT_SETTINGS);
 
   // Cantilever form state — only zigzag is kept for the rubber-band preview while drawing
   const [cantFormZZ, setCantFormZZ] = useState(250);
@@ -181,6 +212,8 @@ export default function EditorPage() {
   const calcExpectedRef = useRef<number>(0);
 
   // Stable refs
+  const projectSettingsRef = useRef(projectSettings);
+  useEffect(() => { projectSettingsRef.current = projectSettings; }, [projectSettings]);
   const completedTracksRef = useRef(completedTracks);
   useEffect(() => { completedTracksRef.current = completedTracks; }, [completedTracks]);
   const polesRef = useRef(poles);
@@ -203,6 +236,16 @@ export default function EditorPage() {
   useEffect(() => { selectedVanesRef.current = selectedVanes; }, [selectedVanes]);
   const vaneFirstCantIdxRef = useRef(vaneFirstCantIdx);
   useEffect(() => { vaneFirstCantIdxRef.current = vaneFirstCantIdx; }, [vaneFirstCantIdx]);
+  const anchorPointsRef = useRef(anchorPoints);
+  useEffect(() => { anchorPointsRef.current = anchorPoints; }, [anchorPoints]);
+  const anchorsRef = useRef(anchors);
+  useEffect(() => { anchorsRef.current = anchors; }, [anchors]);
+  const anchorFirstPoleIdxRef = useRef(anchorFirstPoleIdx);
+  useEffect(() => { anchorFirstPoleIdxRef.current = anchorFirstPoleIdx; }, [anchorFirstPoleIdx]);
+  const selectedAnchorPointsRef = useRef(selectedAnchorPoints);
+  useEffect(() => { selectedAnchorPointsRef.current = selectedAnchorPoints; }, [selectedAnchorPoints]);
+  const selectedAnchorsRef = useRef(selectedAnchors);
+  useEffect(() => { selectedAnchorsRef.current = selectedAnchors; }, [selectedAnchors]);
 
   // Mount engine
   useEffect(() => {
@@ -216,6 +259,15 @@ export default function EditorPage() {
   useEffect(() => {
     if (!locationId) return;
 
+    const loadSettings = (loc: Location) => {
+      if (loc.projectId) {
+        api.projects.get(loc.projectId).then(p => {
+          const parsed = parseProjectSettings(p);
+          if (parsed) setProjectSettings(parsed);
+        }).catch(() => { /* ignore settings load failure */ });
+      }
+    };
+
     const applyScene = (loc: Location) => {
       setLocation(loc);
       const scene = parseSceneData(loc);
@@ -224,6 +276,8 @@ export default function EditorPage() {
         setPoles(scene.poles);
         setCantilevers(scene.cantilevers);
         setVanes(scene.vanes);
+        setAnchorPoints((scene as any).anchorPoints ?? []);
+        setAnchors((scene as any).anchors ?? []);
       }
     };
 
@@ -231,11 +285,12 @@ export default function EditorPage() {
       .then(r => r.json())
       .then((res: CalcLocationResponse) => {
         if (res.status !== 'success') {
-          api.locations.get(locationId).then(applyScene).catch(() => { });
+          api.locations.get(locationId).then(loc => { applyScene(loc); loadSettings(loc); }).catch(() => { });
           return;
         }
 
         applyScene(res.location);
+        loadSettings(res.location);
 
         if (res.poles && res.poles.length > 0) {
           // Clear viewer and caches
@@ -274,7 +329,7 @@ export default function EditorPage() {
         }
       })
       .catch(() => {
-        api.locations.get(locationId).then(applyScene).catch(() => { });
+        api.locations.get(locationId).then(loc => { applyScene(loc); loadSettings(loc); }).catch(() => { });
       });
   }, [locationId]);
 
@@ -373,12 +428,24 @@ export default function EditorPage() {
 
   // Sync dynamic geometry to engine
   useEffect(() => {
+    const s = projectSettings.anchorPoint;
     engineRef.current?.setDynamicGeometry({
       trackPoints, poles, completedTracks, selectedTracks, selectedPoles,
       cantileverPoints: [], cantilevers, vanes, vaneFirstCantIdx,
       selectedCantilevers, selectedVanes,
+      anchorPoints, anchors, anchorFirstPoleIdx,
+      selectedAnchorPoints, selectedAnchors,
+      anchorPointPreviewWidth: s.width,
+      anchorPointPreviewLength: s.length,
+      anchorPointPreviewHeight: s.height,
     });
-  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes]);
+  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes, anchorPoints, anchors, anchorFirstPoleIdx, selectedAnchorPoints, selectedAnchors, projectSettings.anchorPoint]);
+
+  // Auto-fit camera in 2D whenever tracks or poles are added (runs after geometry update above).
+  useEffect(() => {
+    engineRef.current?.resetCamera();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedTracks.length, poles.length]);
 
   // Sync zigzag to engine for preview
   useEffect(() => {
@@ -403,12 +470,14 @@ export default function EditorPage() {
 
       if (cantiList.length === 0) return;
 
+      const projectWireConfig = projectSettingsRef.current.catenarySystem === 'DOUBLE_WIRE' ? 'DOUBLE' : 'SINGLE';
       const payloads = cantiList.map(c => {
         const footX = c.x2raw ?? c.x2;
         const footZ = c.z2raw ?? c.z2;
         const matchPole = polesRef.current.find(p => Math.hypot(p.x - c.x1, p.z - c.z1) < 500);
         return {
           configuration: c.configuration ?? 'TDP>2.2',
+          contactWireConfiguration: c.contactWireConfiguration ?? projectWireConfig,
           polePosition: [c.x1, 0, c.z1],
           pv: [footX, 0, -footZ],
           contactWireHeight: c.contactWireHeight ?? 5400,
@@ -479,6 +548,8 @@ export default function EditorPage() {
     poleList = polesRef.current,
     cantList = cantileversRef.current,
     vaneList = vanesRef.current,
+    apList = anchorPointsRef.current,
+    aList = anchorsRef.current,
   ) => {
     if (!locationId || !location) return;
     const labelMap = new Map<string, { x: number; z: number; y?: number; r?: number; label?: string }[]>();
@@ -490,7 +561,7 @@ export default function EditorPage() {
     const trackData = Array.from(labelMap.entries()).map(([label, pts]) => ({
       label, points: pts.map(({ label: _l, ...rest }) => rest),
     }));
-    const scene: SceneData = { tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList };
+    const scene: SceneData = { tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList, anchorPoints: apList, anchors: aList };
     setSaving(true); setSaveError(null);
     try {
       await api.locations.update(locationId, location.name, scene);
@@ -504,7 +575,7 @@ export default function EditorPage() {
   // viewer-click handler
   useEffect(() => {
     const handleViewerClick = (e: Event) => {
-      const { x, z, y, r, mode, cantileverIdx } = (e as CustomEvent).detail;
+      const { x, z, y, r, mode, cantileverIdx, poleIdx, anchorPointIdx } = (e as CustomEvent).detail;
 
       if (mode === 'track') {
         const newPoints = [...trackPointsRef.current, { x, z, y, r }];
@@ -574,10 +645,71 @@ export default function EditorPage() {
           setVaneModal({ x1: c1.x2, z1: c1.z2, x2: c2.x2, z2: c2.z2 });
           setVaneFirstCantIdx(null);
           setVaneFormLabel('');
-          setVaneFormDroppers(0);
-          setVaneFormInitialSep(5000);
+          setVaneFormDroppers(projectSettings.vane.qtyDroppers);
+          setVaneFormInitialSep(projectSettings.vane.initialSeparation);
           // Store pending cantilever indices via a ref for use in saveVane
           (pendingVaneCantRef as any).current = { cantileverIdx1: firstIdx, cantileverIdx2: clickedIdx };
+        }
+
+      } else if (mode === 'anchorPoint') {
+        // Show configure panel; compute D (distance to nearest pole center)
+        const nearestPole = polesRef.current.reduce<{ d: number; pole: PoleData | null }>((acc, p) => {
+          const d = Math.hypot(x - p.x, z - (p.z || 0));
+          return d < acc.d ? { d, pole: p } : acc;
+        }, { d: Infinity, pole: null });
+        const s = projectSettingsRef.current.anchorPoint;
+        const newAP: AnchorPointData = {
+          x, z, label: '',
+          width: s.width,
+          length: s.length,
+          height: s.height,
+          density: s.density,
+          D: nearestPole.d < Infinity ? nearestPole.d : undefined,
+        };
+        setAnchorPointModal(newAP);
+
+      } else if (mode === 'anchor') {
+        const firstPoleIdx: number | null = anchorFirstPoleIdxRef.current;
+        const clickedPoleIdx: number = poleIdx ?? -1;
+        const clickedAPIdx: number = anchorPointIdx ?? -1;
+
+        if (firstPoleIdx === null) {
+          // First click: must snap to a pole
+          if (clickedPoleIdx < 0) return;
+          setAnchorFirstPoleIdx(clickedPoleIdx);
+        } else {
+          // Second click: must snap to an anchor point
+          if (clickedAPIdx < 0) { setAnchorFirstPoleIdx(null); return; }
+
+          const pole = polesRef.current[firstPoleIdx];
+          const ap = anchorPointsRef.current[clickedAPIdx];
+          if (!pole || !ap) { setAnchorFirstPoleIdx(null); return; }
+
+          // Compute pole face connection point: offset pole center toward anchor point by half pole width
+          const dx = ap.x - pole.x;
+          const dz = (ap.z || 0) - (pole.z || 0);
+          const dist = Math.hypot(dx, dz);
+          const poleHalfW = (pole.width ?? 160) / 2;
+          const nx = dist > 0 ? dx / dist : 1;
+          const nz = dist > 0 ? dz / dist : 0;
+          const facePx = pole.x + nx * poleHalfW;
+          const facePz = (pole.z || 0) + nz * poleHalfW;
+
+          const s = projectSettingsRef.current.anchorPoint;
+          const newAnchor: AnchorData = {
+            poleIdx: firstPoleIdx,
+            anchorPointIdx: clickedAPIdx,
+            px: facePx, pz: facePz,
+            ax: ap.x, az: ap.z || 0,
+            fixingPointHeight: s.fixingPointHeight,
+            label: '',
+          };
+          setAnchors(prev => {
+            const next = [...prev, newAnchor];
+            saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, anchorPointsRef.current, next);
+            return next;
+          });
+          setAnchorFirstPoleIdx(null);
         }
       }
     };
@@ -591,6 +723,8 @@ export default function EditorPage() {
         setSelectedPoles(hovered.type === 'pole' ? [hovered.index] : []);
         setSelectedCantilevers(hovered.type === 'cantilever' ? [hovered.index] : []);
         setSelectedVanes(hovered.type === 'vane' ? [hovered.index] : []);
+        setSelectedAnchorPoints(hovered.type === 'anchorPoint' ? [hovered.index] : []);
+        setSelectedAnchors(hovered.type === 'anchor' ? [hovered.index] : []);
         return;
       }
 
@@ -598,6 +732,8 @@ export default function EditorPage() {
       const selP = new Set<number>();
       const selC = new Set<number>();
       const selV = new Set<number>();
+      const selAP = new Set<number>();
+      const selA = new Set<number>();
       const inB = (x: number, z: number) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
       const matchedLabels = new Set<string>();
 
@@ -624,10 +760,22 @@ export default function EditorPage() {
           if (inB(v.x1, v.z1) || inB(v.x2, v.z2)) selV.add(i);
         });
       }
+      if (selFilterRef.current.anchorPoints) {
+        anchorPointsRef.current.forEach((ap, i) => {
+          if (inB(ap.x, ap.z || 0)) selAP.add(i);
+        });
+      }
+      if (selFilterRef.current.anchors) {
+        anchorsRef.current.forEach((a, i) => {
+          if (inB(a.px, a.pz) || inB(a.ax, a.az)) selA.add(i);
+        });
+      }
       setSelectedTracks(Array.from(selT));
       setSelectedPoles(Array.from(selP));
       setSelectedCantilevers(Array.from(selC));
       setSelectedVanes(Array.from(selV));
+      setSelectedAnchorPoints(Array.from(selAP));
+      setSelectedAnchors(Array.from(selA));
     };
 
     const container = containerRef.current;
@@ -650,17 +798,17 @@ export default function EditorPage() {
         const selP = selectedPolesRef.current;
         const selC = selectedCantiRef.current;
         const selV = selectedVanesRef.current;
-        if (selT.length || selP.length || selC.length || selV.length) {
+        const selAP = selectedAnchorPointsRef.current;
+        const selA = selectedAnchorsRef.current;
+        if (selT.length || selP.length || selC.length || selV.length || selAP.length || selA.length) {
           setCompletedTracks(prev => prev.filter((_, i) => !selT.includes(i)));
           setPoles(prev => prev.filter((_, i) => !selP.includes(i)));
           if (selC.length) {
-            // Build index remapping: old index → new index (-1 if deleted)
             const oldCants = cantileversRef.current;
             const newCants = oldCants.filter((_, i) => !selC.includes(i));
             const idxMap = new Array(oldCants.length).fill(-1);
             let ni = 0;
             oldCants.forEach((_, oi) => { if (!selC.includes(oi)) idxMap[oi] = ni++; });
-
             setCantilevers(newCants);
             setVanes(prev => prev
               .filter(v => idxMap[v.cantileverIdx1] !== -1 && idxMap[v.cantileverIdx2] !== -1)
@@ -669,12 +817,29 @@ export default function EditorPage() {
           } else {
             setVanes(prev => prev.filter((_, i) => !selV.includes(i)));
           }
+          if (selAP.length) {
+            // Remove anchors that reference deleted anchor points, remap indices
+            const oldAPs = anchorPointsRef.current;
+            const newAPs = oldAPs.filter((_, i) => !selAP.includes(i));
+            const apIdxMap = new Array(oldAPs.length).fill(-1);
+            let nap = 0;
+            oldAPs.forEach((_, oi) => { if (!selAP.includes(oi)) apIdxMap[oi] = nap++; });
+            setAnchorPoints(newAPs);
+            setAnchors(prev => prev
+              .filter(a => apIdxMap[a.anchorPointIdx] !== -1)
+              .map(a => ({ ...a, anchorPointIdx: apIdxMap[a.anchorPointIdx] }))
+            );
+          } else {
+            setAnchors(prev => prev.filter((_, i) => !selA.includes(i)));
+          }
           setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
+          setSelectedAnchorPoints([]); setSelectedAnchors([]);
         }
       } else if (e.key === 'Escape') {
-        setTrackPoints([]); setVaneFirstCantIdx(null);
+        setTrackPoints([]); setVaneFirstCantIdx(null); setAnchorFirstPoleIdx(null);
         if (drawMode !== 'none') { setDrawMode('none'); engineRef.current?.setDrawMode('none'); }
         setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
+        setSelectedAnchorPoints([]); setSelectedAnchors([]);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -729,6 +894,7 @@ export default function EditorPage() {
     if (!vaneFormLabel.trim()) { alert('Label is required'); return; }
     const pending = pendingVaneCantRef.current;
     if (!pending) return;
+    const s = projectSettings.vane;
     const newV: VaneData = {
       cantileverIdx1: pending.cantileverIdx1,
       cantileverIdx2: pending.cantileverIdx2,
@@ -737,11 +903,15 @@ export default function EditorPage() {
       label: vaneFormLabel.trim(),
       qtyDroppers: vaneFormDroppers,
       initialSeparation: vaneFormInitialSep,
+      cwWeight: s.cwWeight,
+      cwTension: s.cwTension,
+      swWeight: s.swWeight,
+      swTension: s.swTension,
+      dropperWeight: s.dropperWeight,
     };
     setVanes(prev => {
       const next = [...prev, newV];
       saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, next);
-      triggerVaneCalculation([newV], cantileversRef.current);
       return next;
     });
     pendingVaneCantRef.current = null;
@@ -876,7 +1046,7 @@ export default function EditorPage() {
     engineRef.current?.resetCamera();
   };
 
-  const totalSelected = selectedTracks.length + selectedPoles.length + selectedCantilevers.length + selectedVanes.length;
+  const totalSelected = selectedTracks.length + selectedPoles.length + selectedCantilevers.length + selectedVanes.length + selectedAnchorPoints.length + selectedAnchors.length;
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -925,31 +1095,52 @@ export default function EditorPage() {
       <div className="ocs-body">
         <aside className="ocs-toolbar">
           <div className="tool-group">
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-              <ToolButton icon={<MousePointer2 size={17} />} label="Select" active={drawMode === 'none'} onClick={() => selectDraw('none')} />
-              {drawMode === 'none' && viewMode === '2D' && (
-                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '8px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, animation: 'fadeInDown 0.2s ease-out', fontSize: 11 }}>
+            <div ref={selectFilterRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', position: 'relative' }}>
+              <ToolButton icon={<MousePointer2 size={17} />} label="Select" active={drawMode === 'none'} onClick={(e) => {
+                e.stopPropagation();
+                if (viewMode === '3D') return;
+                if (drawMode !== 'none') {
+                  selectDraw('none');
+                  setShowSelectFilter(true);
+                } else {
+                  setShowSelectFilter(p => !p);
+                }
+              }} />
+              {showSelectFilter && drawMode === 'none' && viewMode === '2D' && (
+                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '8px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, animation: 'filterScaleIn 0.15s ease-out', transformOrigin: 'top center', fontSize: 11, width: '100%' }}>
+                  <style>{`@keyframes filterScaleIn { from { opacity: 0; transform: scaleY(0.95) translateY(-5px); } to { opacity: 1; transform: scaleY(1) translateY(0); } }`}</style>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Tracks</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Poles</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.cantilevers} onChange={e => setSelFilter(f => ({ ...f, cantilevers: e.target.checked }))} style={{ accentColor: '#f59e0b', cursor: 'pointer' }} /> Cantilevers</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.vanes} onChange={e => setSelFilter(f => ({ ...f, vanes: e.target.checked }))} style={{ accentColor: '#9333ea', cursor: 'pointer' }} /> Vanes</label>
-                  {totalSelected > 0 && (
-                    <div style={{ marginTop: 4, paddingTop: 6, borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <span style={{ color: '#94a3b8', fontSize: 10 }}>{totalSelected} selected</span>
-                      {selectedCantilevers.length === 1 && (
-                        <button onClick={() => openEditCantilever(selectedCantilevers[0])} style={{ padding: '3px 8px', background: '#f59e0b', border: 'none', color: '#000', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Cantilever</button>
-                      )}
-                      {selectedVanes.length === 1 && (
-                        <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '3px 8px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Vane</button>
-                      )}
-                      {selectedPoles.length === 1 && (
-                        <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '3px 8px', background: '#ef4444', border: 'none', color: '#fff', borderRadius: 3, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Edit Pole</button>
-                      )}
-                    </div>
-                  )}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.anchorPoints} onChange={e => setSelFilter(f => ({ ...f, anchorPoints: e.target.checked }))} style={{ accentColor: '#f97316', cursor: 'pointer' }} /> Anchor Points</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.anchors} onChange={e => setSelFilter(f => ({ ...f, anchors: e.target.checked }))} style={{ accentColor: '#fb923c', cursor: 'pointer' }} /> Anchors</label>
                 </div>
               )}
             </div>
+
+            {totalSelected > 0 && (
+              <div style={{ marginTop: 12, padding: '8px', background: '#1e293b', border: '1px solid #3b82f6', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 6, width: '100%', animation: 'filterScaleIn 0.2s', textAlign: 'center' }}>
+                <span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>
+                  {totalSelected} ITEM{totalSelected === 1 ? '' : 'S'} SELECTED
+                </span>
+                {selectedCantilevers.length === 1 && (
+                  <button onClick={() => openEditCantilever(selectedCantilevers[0])} style={{ padding: '5px 8px', background: '#f59e0b', border: 'none', color: '#000', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Cantilever</button>
+                )}
+                {selectedVanes.length === 1 && (
+                  <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '5px 8px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Vane</button>
+                )}
+                {selectedPoles.length === 1 && (
+                  <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '5px 8px', background: '#ef4444', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Pole</button>
+                )}
+                {selectedAnchorPoints.length === 1 && (
+                  <button onClick={() => setEditAnchorPointIdx(selectedAnchorPoints[0])} style={{ padding: '5px 8px', background: '#f97316', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Anchor Point</button>
+                )}
+                {selectedAnchors.length === 1 && (
+                  <button onClick={() => setEditAnchorIdx(selectedAnchors[0])} style={{ padding: '5px 8px', background: '#fb923c', border: 'none', color: '#000', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Anchor</button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="tool-sep" />
@@ -972,6 +1163,8 @@ export default function EditorPage() {
             <ToolButton icon={<CircleDot size={17} />} label="Pole" active={drawMode === 'pole'} disabled={viewMode === '3D'} onClick={() => selectDraw('pole')} />
             <ToolButton icon={<GitMerge size={17} />} label="Cantilever" active={drawMode === 'cantilever'} disabled={viewMode === '3D'} onClick={() => selectDraw('cantilever')} />
             <ToolButton icon={<Link2 size={17} />} label="Vane" active={drawMode === 'vane'} disabled={viewMode === '3D'} onClick={() => selectDraw('vane')} title="Connect two cantilever track-side ends" />
+            <ToolButton icon={<Layout size={17} />} label="Anchor Pt" active={drawMode === 'anchorPoint'} disabled={viewMode === '3D'} onClick={() => selectDraw('anchorPoint')} title="Place anchor point plate" />
+            <ToolButton icon={<Anchor size={17} />} label="Anchor" active={drawMode === 'anchor'} disabled={viewMode === '3D'} onClick={() => { selectDraw('anchor'); setAnchorFirstPoleIdx(null); }} title="Draw anchor: click pole then anchor point" />
           </div>
 
           <div className="tool-sep" />
@@ -986,6 +1179,8 @@ export default function EditorPage() {
             <LegendItem color="#ef4444" label="Catenary Pole" />
             <LegendItem color="#22c55e" label="Cantilever" />
             <LegendItem color="#9333ea" label="Vane" />
+            <LegendItem color="#f97316" label="Anchor Point" />
+            <LegendItem color="#fb923c" label="Anchor" />
           </div>
         </aside>
 
@@ -1117,7 +1312,8 @@ export default function EditorPage() {
 
         {poleModal && (
           <PolePanel
-            pole={{ x: poleModal.x, z: poleModal.z, y: poleModal.y, label: '', h: 3000, cantileversQuantity: 1, catSeparation: 720 }}
+            pole={{ x: poleModal.x, z: poleModal.z, y: poleModal.y, label: '', h: projectSettings.pole.height, cantileversQuantity: 1, catSeparation: 720 }}
+            settings={projectSettings}
             onSave={(updated) => {
               if (!updated.label?.trim()) { alert('Label is required'); return; }
               setPoles(prev => { const next = [...prev, updated]; saveScene(completedTracksRef.current, next); return next; });
@@ -1155,21 +1351,23 @@ export default function EditorPage() {
               tx: cantileverModal.tx,
               tz: cantileverModal.tz,
               label: '',
-              contactWireHeight: 5400,
-              systemHeight: 1000,
-              contactWireVerticalOffset: 120,
-              zigzag: 250,
-              supportOffset: 1440,
-              fixingDistance: 1500,
-              bottomFixedHeight: 5440,
-              u: 0,
+              contactWireHeight: projectSettings.cantilever.contactWireHeight,
+              systemHeight: projectSettings.cantilever.systemHeight,
+              contactWireVerticalOffset: projectSettings.cantilever.contactWireVerticalOffset,
+              zigzag: projectSettings.cantilever.zigzag,
+              supportOffset: projectSettings.cantilever.supportOffset,
+              fixingDistance: projectSettings.cantilever.fixingDistance,
+              bottomFixedHeight: projectSettings.cantilever.bottomFixedHeight,
+              u: projectSettings.cantilever.u,
               curveRadiusDirection: 'inside',
-              trackGauge: 1435,
-              configuration: 'TDP>2.2',
+              trackGauge: projectSettings.cantilever.trackGauge,
+              configuration: projectSettings.catenarySystem === 'SINGLE_WIRE' ? 'SBA' : 'TDP>2.2',
+              contactWireConfiguration: projectSettings.catenarySystem === 'SINGLE_WIRE' ? 'SINGLE' : 'DOUBLE',
               steadyArmAlpha: -2,
               registerArmAlpha: 2,
               steadyArmLength: 1200,
             }}
+            catenarySystem={projectSettings.catenarySystem}
             onSave={handleCreateFromPanel}
             onClose={() => setCantileverModal(null)}
           />
@@ -1203,6 +1401,7 @@ export default function EditorPage() {
         {editPoleIdx !== null && poles[editPoleIdx] && (
           <PolePanel
             pole={poles[editPoleIdx]}
+            settings={projectSettings}
             onSave={(updated) => {
               if (!updated.label?.trim()) { alert('Label is required'); return; }
               setPoles(prev => { const n = [...prev]; n[editPoleIdx!] = updated; saveScene(completedTracksRef.current, n); return n; });
@@ -1216,6 +1415,7 @@ export default function EditorPage() {
         {editCantileverIdx !== null && cantilevers[editCantileverIdx] && (
           <CantileverPanel
             cantilever={cantilevers[editCantileverIdx]}
+            catenarySystem={projectSettings.catenarySystem}
             onSave={handleSaveFromPanel}
             onCalculate={handleCalculateFromPanel}
             onClose={() => {
@@ -1245,6 +1445,67 @@ export default function EditorPage() {
               engineRef.current?.setViewMode('2D');
               engineRef.current?.resetCamera();
             }}
+          />
+        )}
+
+        {/* ── Create: Anchor Point ── */}
+        {anchorPointModal && (
+          <AnchorPointPanel
+            anchorPoint={anchorPointModal}
+            onSave={(updated) => {
+              if (!updated.label?.trim()) { alert('Label is required'); return; }
+              setAnchorPoints(prev => {
+                const next = [...prev, updated];
+                saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, next, anchorsRef.current);
+                return next;
+              });
+              setAnchorPointModal(null);
+            }}
+            onClose={() => setAnchorPointModal(null)}
+          />
+        )}
+
+        {/* ── Edit: Anchor Point ── */}
+        {editAnchorPointIdx !== null && anchorPoints[editAnchorPointIdx] && (
+          <AnchorPointPanel
+            anchorPoint={anchorPoints[editAnchorPointIdx]}
+            onSave={(updated) => {
+              setAnchorPoints(prev => {
+                const next = [...prev];
+                next[editAnchorPointIdx!] = updated;
+                // Also update anchor connection points if anchor point moved
+                setAnchors(aList => aList.map(a =>
+                  a.anchorPointIdx === editAnchorPointIdx
+                    ? { ...a, ax: updated.x, az: updated.z || 0 }
+                    : a
+                ));
+                saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, next, anchorsRef.current);
+                return next;
+              });
+              setEditAnchorPointIdx(null);
+              setSelectedAnchorPoints([]);
+            }}
+            onClose={() => { setEditAnchorPointIdx(null); }}
+          />
+        )}
+
+        {/* ── Edit: Anchor ── */}
+        {editAnchorIdx !== null && anchors[editAnchorIdx] && (
+          <AnchorPanel
+            anchor={anchors[editAnchorIdx]}
+            poleLabel={poles[anchors[editAnchorIdx].poleIdx]?.label}
+            anchorPointLabel={anchorPoints[anchors[editAnchorIdx].anchorPointIdx]?.label}
+            onSave={(updated) => {
+              setAnchors(prev => {
+                const next = [...prev];
+                next[editAnchorIdx!] = updated;
+                saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, anchorPointsRef.current, next);
+                return next;
+              });
+              setEditAnchorIdx(null);
+              setSelectedAnchors([]);
+            }}
+            onClose={() => { setEditAnchorIdx(null); }}
           />
         )}
       </div>

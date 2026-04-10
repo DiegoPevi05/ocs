@@ -38,7 +38,7 @@ export interface ApiResponse {
 // ─── Viewer state types ────────────────────────────────────────────────────────
 
 export type ViewMode = '2D' | '3D';
-export type DrawMode = 'none' | 'track' | 'pole' | 'cantilever' | 'vane';
+export type DrawMode = 'none' | 'track' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor';
 
 // ─── Scene drawing types ───────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ export interface PoleData {
   id?: string; label?: string; x: number; z: number; y?: number; h?: number;
   cantileversQuantity?: number;  // how many catenary wires on this pole, default 1
   catSeparation?: number;        // vertical separation between catenary wires mm, default 720
-  
+
   // Physical & Profile Properties
   density?: number;
   inertiaX?: number;
@@ -58,8 +58,9 @@ export interface PoleData {
   crossAreaY?: number;
   crossAreaZ?: number;
   profileType?: 'SQUARE_HOLE' | 'CIRCLE_HOLE' | 'T_PROFILE' | 'DOUBLE_T' | 'CUSTOM' | string;
-  width?: number;   // cross-section width mm (editable for CUSTOM, calculated for others)
-  length?: number;  // cross-section depth mm (editable for CUSTOM, calculated for others)
+  width?: number;            // cross-section outer width mm
+  length?: number;           // cross-section outer depth/height mm
+  sectionThickness?: number; // wall thickness for hollow sections (SQUARE_HOLE / CIRCLE_HOLE), default 5
 }
 export interface CantileverData {
   id?: string; label?: string;
@@ -81,6 +82,7 @@ export interface CantileverData {
   curveRadiusDirection?: string;       // 'inside' | 'outside', default 'inside'
   trackGauge?: number;                 // mm, default 1435
   configuration?: string;              // "TDP>2.2" | "TDP<2.2" | "CAI" | "SBA"
+  contactWireConfiguration?: 'SINGLE' | 'DOUBLE'; // per-cantilever override; inherits project setting
   steadyArmAlpha?: number;             // degrees, default -2.0
   registerArmAlpha?: number;           // degrees, default 2.0
   steadyArmLength?: number;            // mm, default 1200
@@ -156,19 +158,124 @@ export interface CalcLocationResponse {
   poles: CalcPoleEntry[];
 }
 
+export interface AnchorPointData {
+  id?: string; label?: string;
+  x: number; z: number;          // center position in XZ plane
+  width?: number;                 // mm, default from project settings
+  length?: number;                // mm, default from project settings
+  height?: number;                // mm, default from project settings
+  density?: number;               // kg/m³, default from project settings
+  D?: number;                     // mm, distance to nearest pole center (computed during placement)
+}
+
+export interface AnchorData {
+  id?: string; label?: string;
+  poleIdx: number;               // index into poles array
+  anchorPointIdx: number;        // index into anchorPoints array
+  // Connection points (computed from pole face + anchor point top center)
+  px: number; pz: number;        // pole face connection point XZ
+  ax: number; az: number;        // anchor point top center XZ
+  fixingPointHeight?: number;    // mm from pole base, default from project settings
+  density?: number;              // kg/m³
+  crossSection?: number;         // mm²
+}
+
 export interface SceneData {
   tracks: TrackData[];
   poles: PoleData[];
   cantilevers: CantileverData[];
   vanes: VaneData[];
+  anchorPoints: AnchorPointData[];
+  anchors: AnchorData[];
 }
 
 // ─── REST API resource types ───────────────────────────────────────────────────
+
+// ─── Project settings (inherited defaults for new poles, cantilevers, vanes) ───
+
+export interface ProjectSettings {
+  catenarySystem: 'DOUBLE_WIRE' | 'SINGLE_WIRE';
+  pole: {
+    height: number;
+    squareHollowWidth: number;
+    squareHollowLength: number;
+    squareHollowThickness: number;
+    circleHollowDiameter: number;
+    circleHollowThickness: number;
+  };
+  cantilever: {
+    contactWireHeight: number;
+    systemHeight: number;
+    contactWireVerticalOffset: number;
+    zigzag: number;
+    supportOffset: number;
+    bottomFixedHeight: number;
+    fixingDistance: number;
+    u: number;
+    trackGauge: number;
+  };
+  vane: {
+    cwWeight: number;
+    swWeight: number;
+    cwTension: number;
+    swTension: number;
+    dropperWeight: number;
+    initialSeparation: number;
+    qtyDroppers: number;
+  };
+  anchorPoint: {
+    width: number;               // mm, default plate width
+    length: number;              // mm, default plate length
+    height: number;              // mm, default plate height/thickness
+    density: number;             // kg/m³
+    fixingPointHeight: number;   // mm from pole base (used for Anchor)
+  };
+}
+
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  catenarySystem: 'DOUBLE_WIRE',
+  pole: {
+    height: 3000,
+    squareHollowWidth: 160,
+    squareHollowLength: 160,
+    squareHollowThickness: 5,
+    circleHollowDiameter: 160,
+    circleHollowThickness: 5,
+  },
+  cantilever: {
+    contactWireHeight: 5400,
+    systemHeight: 1000,
+    contactWireVerticalOffset: 120,
+    zigzag: 250,
+    supportOffset: 1440,
+    bottomFixedHeight: 5440,
+    fixingDistance: 1500,
+    u: 0,
+    trackGauge: 1435,
+  },
+  vane: {
+    cwWeight: 0.0019,
+    swWeight: 0.0024,
+    cwTension: 1600,
+    swTension: 2000,
+    dropperWeight: 0.0006,
+    initialSeparation: 5000,
+    qtyDroppers: 0,
+  },
+  anchorPoint: {
+    width: 400,
+    length: 400,
+    height: 20,
+    density: 7850,
+    fixingPointHeight: 500,
+  },
+};
 
 export interface Project {
   id: string;
   name: string;
   description?: string;
+  settings?: string | null;  // JSON-serialized ProjectSettings
   createdAt: string;
 }
 

@@ -1,4 +1,5 @@
-import type { Location, Project, SceneData } from '../types';
+import { DEFAULT_PROJECT_SETTINGS } from '../types';
+import type { Location, Project, ProjectSettings, SceneData } from '../types';
 
 const BASE = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api`;
 
@@ -23,6 +24,8 @@ export const api = {
     update: (id: string, name: string, description?: string) =>
       req<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify({ name, description }) }),
     delete: (id: string) => req<void>(`/projects/${id}`, { method: 'DELETE' }),
+    updateSettings: (id: string, settings: ProjectSettings) =>
+      req<Project>(`/projects/${id}/settings`, { method: 'PUT', body: JSON.stringify({ settings: JSON.stringify(settings) }) }),
   },
 
   // ─── Locations ──────────────────────────────────────────────────────────────
@@ -61,4 +64,24 @@ export function parseSceneData(loc: Location): SceneData | null {
   if (!loc.sceneData) return null;
   if (typeof loc.sceneData === 'object') return loc.sceneData as SceneData;
   try { return JSON.parse(loc.sceneData as unknown as string); } catch { return null; }
+}
+
+/** Parse project settings (stored as a JSON string inside the jsonb column) */
+export function parseProjectSettings(project: Project): ProjectSettings | null {
+  if (!project.settings) return null;
+  let parsed: any;
+  if (typeof project.settings === 'object') {
+    parsed = project.settings;
+  } else {
+    try { parsed = JSON.parse(project.settings as unknown as string); } catch { return null; }
+  }
+  
+  return {
+    ...DEFAULT_PROJECT_SETTINGS,
+    ...parsed,
+    pole: { ...DEFAULT_PROJECT_SETTINGS.pole, ...(parsed.pole || {}) },
+    cantilever: { ...DEFAULT_PROJECT_SETTINGS.cantilever, ...(parsed.cantilever || {}) },
+    vane: { ...DEFAULT_PROJECT_SETTINGS.vane, ...(parsed.vane || {}) },
+    anchorPoint: { ...DEFAULT_PROJECT_SETTINGS.anchorPoint, ...(parsed.anchorPoint || {}) }
+  };
 }

@@ -81,7 +81,19 @@ public class LocationController {
                 final int[] cantQtyArr    = new int[numCantis];   // cantileversQuantity per drawn cantilever
                 final int[] outputOffsets = new int[numCantis];   // start index in batchResult.poles
 
+                // ── Resolve contactWireConfiguration from project settings ────
+                String contactWireConfig = "SINGLE";
+                try {
+                    String projSettings = loc.getProject().getSettings();
+                    if (projSettings != null && !projSettings.isEmpty()) {
+                        com.fasterxml.jackson.databind.JsonNode ps = mapper.readTree(projSettings);
+                        String sys = ps.path("catenarySystem").asText("DOUBLE_WIRE");
+                        if ("DOUBLE_WIRE".equals(sys)) contactWireConfig = "DOUBLE";
+                    }
+                } catch (Exception ignored) {}
+
                 // ── Build cantilever batch payloads ───────────────────────────
+                final String finalWireConfig = contactWireConfig;
                 com.fasterxml.jackson.databind.node.ArrayNode cantPayloads = mapper.createArrayNode();
                 for (int ci = 0; ci < numCantis; ci++) {
                     com.fasterxml.jackson.databind.JsonNode c = cantileversNode.get(ci);
@@ -100,6 +112,7 @@ public class LocationController {
 
                     com.fasterxml.jackson.databind.node.ObjectNode p = mapper.createObjectNode();
                     p.put("configuration", c.path("configuration").asText("TDP>2.2"));
+                    p.put("contactWireConfiguration", finalWireConfig);
                     com.fasterxml.jackson.databind.node.ArrayNode pp = mapper.createArrayNode(); pp.add(x1).add(0.0).add(z1); p.set("polePosition", pp);
                     double fx = c.has("x2raw") ? c.path("x2raw").asDouble() : c.path("x2").asDouble();
                     double fz = c.has("z2raw") ? c.path("z2raw").asDouble() : c.path("z2").asDouble();

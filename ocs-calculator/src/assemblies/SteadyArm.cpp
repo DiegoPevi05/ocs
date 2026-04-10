@@ -131,6 +131,7 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
 }
 
 void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
+    // Returns midpoint of closest approach on two skew lines (used for intersectionPoint).
     auto solveLines = [](math::Vec3 P1, math::Vec3 D1, math::Vec3 P2, math::Vec3 D2) {
         math::Vec3 r = math::subtract(P1, P2);
         double a = math::dot(D1, D1), b = math::dot(D1, D2), c = math::dot(D2, D2), d = math::dot(D1, r), e = math::dot(D2, r);
@@ -142,6 +143,15 @@ void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
         math::Vec3 pt2 = math::getPointFromDirection(P2, D2, t2);
         return math::Vec3{ 0.5*(pt1.x + pt2.x), 0.5*(pt1.y + pt2.y), 0.5*(pt1.z + pt2.z) };
     };
+    // Returns only the point on line 1 (matches TS reference getIntersectionTubeFixedPoint).
+    auto solveLinesPt1 = [](math::Vec3 P1, math::Vec3 D1, math::Vec3 P2, math::Vec3 D2) {
+        math::Vec3 r = math::subtract(P1, P2);
+        double a = math::dot(D1, D1), b = math::dot(D1, D2), c = math::dot(D2, D2), d = math::dot(D1, r), e = math::dot(D2, r);
+        double denom = a*c - b*b;
+        if (std::abs(denom) < 1e-6) throw std::runtime_error("Lines parallel");
+        double t1 = (b*e - c*d) / denom;
+        return math::getPointFromDirection(P1, D1, t1);
+    };
 
     if (components::isSba(config) || components::isTdpLt2_2(config)) {
         if (!endPoint.empty()) {
@@ -149,7 +159,8 @@ void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
             math::Vec3 D1 = math::getDirectionVector(bracketTube->upperEyeClampClevisFixedPoint, P1);
             intersectionPoint = solveLines(P1, D1, endPoint[0], dir);
             math::Vec3 P2_shift = math::subtract(endPoint[0], math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
-            intersectionTubeFixedPoint = solveLines(intersectionPoint, bracketTube->dir, P2_shift, dir);
+            // P1 must be a known point ON the bracket tube line; bottomFixedPoint qualifies.
+            intersectionTubeFixedPoint = solveLinesPt1(bracketTube->bottomFixedPoint, bracketTube->dir, P2_shift, dir);
             intersectionRegisterArmFixedPoint = math::add(intersectionTubeFixedPoint, math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
             if (params.hook_end_fitting) hookEndFittingPoint = math::add(intersectionRegisterArmFixedPoint, math::scale(dir, params.hook_end_fitting->L - params.hook_end_fitting->a));
             if (registerArm) {
@@ -162,7 +173,8 @@ void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
         math::Vec3 D1 = math::getDirectionVector(bracketTube->upperEyeClampClevisFixedPoint, P1);
         intersectionPoint = solveLines(P1, D1, registerArm->bracketUpperFixedPoint, registerArm->dir);
         math::Vec3 P2_shift = math::subtract(registerArm->bracketUpperFixedPoint, math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
-        intersectionTubeFixedPoint = solveLines(intersectionPoint, bracketTube->dir, P2_shift, registerArm->dir);
+        // P1 must be a known point ON the bracket tube line; bottomFixedPoint qualifies.
+        intersectionTubeFixedPoint = solveLinesPt1(bracketTube->bottomFixedPoint, bracketTube->dir, P2_shift, registerArm->dir);
         intersectionRegisterArmFixedPoint = math::add(intersectionTubeFixedPoint, math::scale(bracketTube->perp, bracketTube->params.eye_clamp.h));
         if (params.hook_end_fitting) hookEndFittingPoint = math::add(registerArm->eyeClampFixedPoint, math::scale(dir, params.hook_end_fitting->L - params.hook_end_fitting->a));
         registerArm->injectIntersectionPoint(intersectionRegisterArmFixedPoint);
@@ -171,13 +183,29 @@ void SteadyArm::calculateIntersections(const CantileverFrame& frame) {
 }
 
 std::vector<TubeDimension> SteadyArm::generateResults(const CantileverFrame& frame) const {
+    const bool isDouble = (contactWireConfig == components::ContactWireConfiguration::DOUBLE);
     std::vector<TubeDimension> res;
-    if (!components::isCai(config) && !endPoint.empty()) {
-        double d3 = math::distanceBetween(endPoint[0], hookEndFittingPoint);
-        res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d3), std::round(d3) + 10.0});
+
+    if (!components::isCai(config) && !components::isTdpGt2_2(config) && !endPoint.empty()) {
+        // TDP<2.2 and SBA: arm tube measured from endPoint[0] to hookEndFittingPoint
+        double d = math::distanceBetween(endPoint[0], hookEndFittingPoint);
+        res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d), std::round(d) + 10.0});
+        // DOUBLE wire: second arm has same geometry → same length
+        if (isDouble)
+            res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d), std::round(d) + 10.0});
+        // SBA only: stainless-steel cable from eye-clamp to wire-support point
+        if (components::isSba(config) && params.stainless_steel_wire_rope) {
+            double dc = math::distanceBetween(eyeClampFixedPoint, wireSupportStainlessSteelPoint);
+            res.push_back({"steel_cable", params.stainless_steel_wire_rope->d, 0.0, std::round(dc), std::round(dc) + 10.0});
+        }
     } else if (!fixedPoint.empty() && !hookClampPoint.empty()) {
-        double d3 = math::distanceBetween(fixedPoint[0], hookClampPoint[0]);
-        res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d3), std::round(d3) + 10.0});
+        // TDP>2.2 and CAI: arm tube measured per wire from fixedPoint to hookClampPoint
+        double d0 = math::distanceBetween(fixedPoint[0], hookClampPoint[0]);
+        res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d0), std::round(d0) + 10.0});
+        if (isDouble && fixedPoint.size() > 1 && hookClampPoint.size() > 1) {
+            double d1 = math::distanceBetween(fixedPoint[1], hookClampPoint[1]);
+            res.push_back({"steady_arm", params.tube.d, params.tube.s, std::round(d1), std::round(d1) + 10.0});
+        }
     }
     return res;
 }
@@ -187,31 +215,51 @@ std::vector<viewer::Line3D> SteadyArm::getRenderLines() const {
     const double tubeR = params.tube.d / 2.0;
     std::vector<viewer::Line3D> lines;
     if (components::isSba(config)) {
-        if (!fixedPoint.empty()) {
-            if (!points.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], points[0], 34, 197, 94, 255));
-            // Main tube body
-            if (!endPoint.empty()) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], endPoint[0], 34, 197, 94, 255, tubeR));
-            // Fittings
-            lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[0], eyeClampPoint, 34, 197, 94, 255));
+        // Shared fittings (emit only when eye_clamp_distance is set, which enables eyeClampPoint)
+        if (params.eye_clamp_distance) {
+            lines.push_back(viewer::Line3D("Steady Arm", hookEndFittingPoint, eyeClampPoint, 34, 197, 94, 255));
+            lines.push_back(viewer::Line3D("Steady Arm", eyeClampPoint, eyeClampFixedPoint, 34, 197, 94, 255));
+            lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
+            // Steel cable: eye-clamp fixed point → wire-support stainless-steel point
+            if (params.stainless_steel_wire_rope)
+                lines.push_back(viewer::Line3D("Steel Cable", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 100, 180, 255, 255));
         }
-        lines.push_back(viewer::Line3D("Steady Arm", hookEndFittingPoint, eyeClampPoint, 34, 197, 94, 255));
-        lines.push_back(viewer::Line3D("Steady Arm", eyeClampPoint, eyeClampFixedPoint, 34, 197, 94, 255));
-        lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
-        lines.push_back(viewer::Line3D("Steady Arm", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 34, 197, 94, 255));
-        if (contactWireConfig == components::ContactWireConfiguration::DOUBLE && fixedPoint.size() > 1 && points.size() > 1) lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[1], points[1], 34, 197, 94, 255));
+        // Per-wire: link to CW clamp + main tube body
+        for (size_t i = 0; i < fixedPoint.size(); ++i) {
+            if (i < points.size())
+                lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[i], points[i], 34, 197, 94, 255));
+            if (i < endPoint.size())
+                lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[i], endPoint[i], 34, 197, 94, 255, tubeR));
+            if (params.eye_clamp_distance)
+                lines.push_back(viewer::Line3D("Steady Arm", fixedPoint[i], eyeClampPoint, 34, 197, 94, 255));
+        }
     } else {
-        if (!yAxisCwPoint.empty() && !points.empty()) {
-            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], points[0], 34, 197, 94, 255));
-            lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[0], fixedPoint[0], 34, 197, 94, 255));
-        }
-        if (!hookClampPoint.empty() && !fixedPoint.empty()) {
-            // Main tube body: CW clamp → bracket connection
-            lines.push_back(viewer::Line3D("Steady Arm", hookClampPoint[0], fixedPoint[0], 34, 197, 94, 255, tubeR));
-            // Fittings
-            if (!hookClampIntersectionSupport.empty()) {
-                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookClampPoint[0], 34, 197, 94, 255));
-                lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[0], hookFixedPoint[0], 34, 197, 94, 255));
+        // Per-wire: swivel-clip link + arm tube + fittings
+        size_t n = points.size();
+        for (size_t i = 0; i < n; ++i) {
+            if (i < yAxisCwPoint.size()) {
+                lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[i], points[i], 34, 197, 94, 255));
+                if (i < fixedPoint.size())
+                    lines.push_back(viewer::Line3D("Steady Arm", yAxisCwPoint[i], fixedPoint[i], 34, 197, 94, 255));
             }
+            if (i < hookClampPoint.size() && i < fixedPoint.size()) {
+                // Main tube body: CW clamp → bracket connection
+                lines.push_back(viewer::Line3D("Steady Arm", hookClampPoint[i], fixedPoint[i], 34, 197, 94, 255, tubeR));
+                // Fittings
+                if (i < hookClampIntersectionSupport.size()) {
+                    lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[i], hookClampPoint[i], 34, 197, 94, 255));
+                    if (i < hookFixedPoint.size())
+                        lines.push_back(viewer::Line3D("Steady Arm", hookClampIntersectionSupport[i], hookFixedPoint[i], 34, 197, 94, 255));
+                }
+            }
+        }
+        // TDP<2.2: main arm tube uses endPoint → bracketTube intersection (hookClampPoint not computed for this type)
+        if (components::isTdpLt2_2(config) && !endPoint.empty()) {
+            for (size_t i = 0; i < endPoint.size(); ++i)
+                lines.push_back(viewer::Line3D("Steady Arm", endPoint[i], intersectionTubeFixedPoint, 34, 197, 94, 255, tubeR));
+            lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
+            if (params.hook_end_fitting)
+                lines.push_back(viewer::Line3D("Steady Arm", intersectionRegisterArmFixedPoint, hookEndFittingPoint, 34, 197, 94, 255));
         }
     }
     return lines;

@@ -47,17 +47,32 @@ function Divider({ label }: { label: string }) {
   );
 }
 
+// ─── Configurations per catenary system ───────────────────────────────────────
+
+const DOUBLE_WIRE_CONFIGS = [
+  { value: 'TDP>2.2', label: 'TDP > 2.2' },
+  { value: 'TDP<2.2', label: 'TDP < 2.2' },
+  { value: 'CAI',     label: 'CAI' },
+  { value: 'SBA',     label: 'SBA' },
+];
+const SINGLE_WIRE_CONFIGS = [
+  { value: 'SBA', label: 'SBA' },
+  { value: 'CAI', label: 'CAI' },
+];
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
   cantilever: CantileverData;
+  catenarySystem?: 'DOUBLE_WIRE' | 'SINGLE_WIRE';
   onSave: (updated: CantileverData) => void;
   onCalculate?: (updated: CantileverData) => void;
   onClose: () => void;
 }
 
-export function CantileverPanel({ cantilever, onSave, onCalculate, onClose }: Props) {
+export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculate, onClose }: Props) {
   const [form, setForm] = useState<CantileverData>({ ...cantilever });
+  const configs = catenarySystem === 'SINGLE_WIRE' ? SINGLE_WIRE_CONFIGS : DOUBLE_WIRE_CONFIGS;
 
   const set = <K extends keyof CantileverData>(key: K, val: CantileverData[K]) =>
     setForm(f => ({ ...f, [key]: val }));
@@ -115,22 +130,32 @@ export function CantileverPanel({ cantilever, onSave, onCalculate, onClose }: Pr
           {/* Configuration */}
           <Field label="Configuration">
             <select
-              value={form.configuration ?? 'TDP>2.2'}
+              value={form.configuration ?? configs[0].value}
               onChange={e => {
                 const cfg = e.target.value;
                 setForm(f => ({
                   ...f,
                   configuration: cfg,
-                  // auto-flip register arm alpha default per configuration
                   registerArmAlpha: cfg === 'CAI' ? -2 : 2,
                 }));
               }}
               style={{ ...INPUT, cursor: 'pointer' }}
             >
-              <option value="TDP>2.2">TDP &gt; 2.2</option>
-              <option value="TDP<2.2">TDP &lt; 2.2</option>
-              <option value="CAI">CAI</option>
-              <option value="SBA">SBA</option>
+              {configs.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          {/* Wire configuration — per-cantilever override */}
+          <Field label="Wire System" hint="Overrides project default for this cantilever">
+            <select
+              value={form.contactWireConfiguration ?? (catenarySystem === 'SINGLE_WIRE' ? 'SINGLE' : 'DOUBLE')}
+              onChange={e => set('contactWireConfiguration', e.target.value as 'SINGLE' | 'DOUBLE')}
+              style={{ ...INPUT, cursor: 'pointer' }}
+            >
+              <option value="DOUBLE">Double Wire</option>
+              <option value="SINGLE">Single Wire</option>
             </select>
           </Field>
 

@@ -43,6 +43,8 @@ export class ViewerEngine {
   public drawMode: DrawMode = 'none';
   public cantileverZigzag: number = 250;
   public snapCantileverIdx: number = -1;
+  public snapPoleIdx: number = -1;
+  public snapAnchorPointIdx: number = -1;
 
   // Grid (2D)
   private gridGroup: THREE.Group;
@@ -71,8 +73,8 @@ export class ViewerEngine {
   // Track current dynamic data for rubberband & snap context
   private dynData: any = { trackPoints: [], poles: [] };
   public trackMode: 'rect' | 'poly' = 'rect';
-  public selFilter = { tracks: true, poles: true, cantilevers: true, vanes: true };
-  private hoveredState: { type: 'track' | 'pole' | 'cantilever' | 'vane', index: number } | null = null;
+  public selFilter = { tracks: true, poles: true, cantilevers: true, vanes: true, anchorPoints: true, anchors: true };
+  private hoveredState: { type: 'track' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor', index: number } | null = null;
 
   // Pan state (2D)
   private panning = false;
@@ -519,6 +521,36 @@ export class ViewerEngine {
       if (closestPt) return closestPt;
     }
 
+    // Anchor snapping — first click: snap to pole; second click: snap to anchor point
+    if (this.drawMode === 'anchor') {
+      const anchorFirstPoleIdx: number | null = this.dynData.anchorFirstPoleIdx ?? null;
+      if (anchorFirstPoleIdx === null) {
+        // First click: snap to nearest pole
+        const poles = this.dynData.poles || [];
+        let closestPt: THREE.Vector2 | null = null;
+        let minD = Infinity;
+        let closestIdx = -1;
+        poles.forEach((p: any, i: number) => {
+          const d = Math.hypot(wx - p.x, wz - (p.z || 0));
+          if (d < minD) { minD = d; closestPt = new THREE.Vector2(p.x, p.z || 0); closestIdx = i; }
+        });
+        this.snapPoleIdx = closestIdx;
+        if (closestPt && minD < 5000) return closestPt;
+      } else {
+        // Second click: snap to nearest anchor point
+        const anchorPoints = this.dynData.anchorPoints || [];
+        let closestPt: THREE.Vector2 | null = null;
+        let minD = Infinity;
+        let closestIdx = -1;
+        anchorPoints.forEach((ap: any, i: number) => {
+          const d = Math.hypot(wx - ap.x, wz - (ap.z || 0));
+          if (d < minD) { minD = d; closestPt = new THREE.Vector2(ap.x, ap.z || 0); closestIdx = i; }
+        });
+        this.snapAnchorPointIdx = closestIdx;
+        if (closestPt && minD < 5000) return closestPt;
+      }
+    }
+
     const sx = Math.round(wx / sp) * sp;
     const sz = Math.round(wz / sp) * sp;
 
@@ -673,6 +705,12 @@ export class ViewerEngine {
         if (this.selFilter.vanes && this.dynData.vanes) {
           this.dynData.vanes.forEach((v: any, i: number) => checkSegment(v.x1, v.z1, v.x2, v.z2, 'vane', i));
         }
+        if (this.selFilter.anchorPoints && this.dynData.anchorPoints) {
+          this.dynData.anchorPoints.forEach((ap: any, i: number) => checkPt(ap.x, ap.z || 0, 'anchorPoint', i));
+        }
+        if (this.selFilter.anchors && this.dynData.anchors) {
+          this.dynData.anchors.forEach((a: any, i: number) => checkSegment(a.px, a.pz, a.ax, a.az, 'anchor', i));
+        }
         if (this.selFilter.tracks && this.dynData.completedTracks) {
           this.dynData.completedTracks.forEach((tr: any, i: number) => {
             for (let j = 1; j < tr.length; j++) {
@@ -769,10 +807,9 @@ export class ViewerEngine {
       this.setCursorPositionCore(finalX, finalZ);
 
       if (this.coordsEl) {
-        const rx = e.clientX + 20;
-        const ry = e.clientY + 20;
-        this.coordsEl.style.left = `${rx}px`;
-        this.coordsEl.style.top = `${ry}px`;
+        const rect = this.container.getBoundingClientRect();
+        this.coordsEl.style.left = `${e.clientX - rect.left + 20}px`;
+        this.coordsEl.style.top  = `${e.clientY - rect.top  + 20}px`;
       }
 
       this.updateRubberband(finalX, finalZ);
@@ -798,7 +835,7 @@ export class ViewerEngine {
       const r = parseFloat(((this as any)._rInput as HTMLInputElement)?.value) || 0;
       const y = parseFloat(((this as any)._yInput as HTMLInputElement)?.value) || 0;
       this.container.dispatchEvent(new CustomEvent('viewer-click', {
-        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx }
+        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx, poleIdx: this.snapPoleIdx, anchorPointIdx: this.snapAnchorPointIdx }
       }));
     } else if (e.button === 0 && this.drawMode === 'none') {
       this.isSelecting = true;
@@ -1144,6 +1181,82 @@ export class ViewerEngine {
         line.computeLineDistances();
         this.rubberbandGroup.add(line);
       }
+    } else if (this.drawMode === 'anchorPoint') {
+      // Square preview in 2D
+      const apW = (this.dynData.anchorPointPreviewWidth ?? 400) / 2;
+      const apL = (this.dynData.anchorPointPreviewLength ?? 400) / 2;
+      const pts2d = [
+        new THREE.Vector3(wx - apW, 1, wz - apL),
+        new THREE.Vector3(wx + apW, 1, wz - apL),
+        new THREE.Vector3(wx + apW, 1, wz + apL),
+        new THREE.Vector3(wx - apW, 1, wz + apL),
+        new THREE.Vector3(wx - apW, 1, wz - apL),
+      ];
+      const geo2d = new THREE.BufferGeometry().setFromPoints(pts2d);
+      const mat2d = new THREE.LineBasicMaterial({ color: 0xf97316 });
+      const sq = new THREE.Line(geo2d, mat2d);
+      sq.layers.set(1);
+      this.rubberbandGroup.add(sq);
+
+      // 3D box preview
+      const h3d = this.dynData.anchorPointPreviewHeight ?? 20;
+      const boxGeo = new THREE.BoxGeometry(apW * 2, h3d, apL * 2);
+      const boxMat = new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.5, wireframe: true });
+      const box = new THREE.Mesh(boxGeo, boxMat);
+      box.position.set(wx, h3d / 2, wz);
+      box.layers.set(2);
+      this.rubberbandGroup.add(box);
+    } else if (this.drawMode === 'anchor') {
+      const anchorFirstPoleIdx: number | null = this.dynData.anchorFirstPoleIdx ?? null;
+      const poles = this.dynData.poles || [];
+      const anchorPoints = this.dynData.anchorPoints || [];
+
+      // Highlight all poles if waiting for first click
+      poles.forEach((p: any, i: number) => {
+        const isSnapped = this.snapPoleIdx === i;
+        const color = isSnapped ? 0xfbbf24 : 0xef4444;
+        const radius = isSnapped ? 320 : 220;
+        const cgeo = new THREE.CircleGeometry(radius, 16);
+        cgeo.rotateX(-Math.PI / 2);
+        const cmat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+        const dot = new THREE.Mesh(cgeo, cmat);
+        dot.position.set(p.x, 1, p.z || 0);
+        dot.layers.set(1);
+        this.rubberbandGroup.add(dot);
+      });
+
+      // Highlight all anchor points
+      anchorPoints.forEach((ap: any, i: number) => {
+        const isSnapped = this.snapAnchorPointIdx === i;
+        const color = isSnapped ? 0xfbbf24 : 0xf97316;
+        const apW2 = (ap.width ?? 400) / 2;
+        const apL2 = (ap.length ?? 400) / 2;
+        const pts = [
+          new THREE.Vector3(ap.x - apW2, 1, (ap.z || 0) - apL2),
+          new THREE.Vector3(ap.x + apW2, 1, (ap.z || 0) - apL2),
+          new THREE.Vector3(ap.x + apW2, 1, (ap.z || 0) + apL2),
+          new THREE.Vector3(ap.x - apW2, 1, (ap.z || 0) + apL2),
+          new THREE.Vector3(ap.x - apW2, 1, (ap.z || 0) - apL2),
+        ];
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color });
+        const sq = new THREE.Line(geo, mat);
+        sq.layers.set(1);
+        this.rubberbandGroup.add(sq);
+      });
+
+      // If first pole is selected, draw dashed line from pole to cursor
+      if (anchorFirstPoleIdx !== null && poles[anchorFirstPoleIdx]) {
+        const fp = poles[anchorFirstPoleIdx];
+        const geo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(fp.x, 1, fp.z || 0),
+          new THREE.Vector3(wx, 1, wz),
+        ]);
+        const mat = new THREE.LineDashedMaterial({ color: 0xf97316, dashSize: 200, gapSize: 150 });
+        const line = new THREE.Line(geo, mat);
+        line.computeLineDistances();
+        this.rubberbandGroup.add(line);
+      }
     } else if (this.drawMode === 'cantilever') {
       // Find nearest track foot + track segment direction for zigzag
       let footX = wx, footZ = wz;
@@ -1430,6 +1543,97 @@ export class ViewerEngine {
         });
       });
     }
+
+    // Render anchor points
+    if (data.anchorPoints) {
+      data.anchorPoints.forEach((ap: any, i: number) => {
+        const isSelected = data.selectedAnchorPoints?.includes(i) ?? false;
+        const isHovered = this.hoveredState?.type === 'anchorPoint' && this.hoveredState?.index === i;
+        const color = isSelected ? 0xfbbf24 : (isHovered ? 0xfde047 : 0xf97316);
+        const apW = (ap.width ?? 400) / 2;
+        const apL = (ap.length ?? 400) / 2;
+        const apH = ap.height ?? 20;
+
+        // 2D: flat filled square (PlaneGeometry in XZ plane)
+        const geo2d = new THREE.PlaneGeometry(apW * 2, apL * 2);
+        geo2d.rotateX(-Math.PI / 2);
+        const mat2d = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: isSelected ? 0.9 : 0.7 });
+        const sq2d = new THREE.Mesh(geo2d, mat2d);
+        sq2d.position.set(ap.x, ap.y || 0, ap.z || 0);
+        sq2d.layers.set(1);
+        this.dynamicGroup.add(sq2d);
+
+        // 2D: outline
+        const outlinePts = [
+          new THREE.Vector3(ap.x - apW, 1, (ap.z || 0) - apL),
+          new THREE.Vector3(ap.x + apW, 1, (ap.z || 0) - apL),
+          new THREE.Vector3(ap.x + apW, 1, (ap.z || 0) + apL),
+          new THREE.Vector3(ap.x - apW, 1, (ap.z || 0) + apL),
+          new THREE.Vector3(ap.x - apW, 1, (ap.z || 0) - apL),
+        ];
+        const outlineGeo = new THREE.BufferGeometry().setFromPoints(outlinePts);
+        const outlineMat = new THREE.LineBasicMaterial({ color: isSelected ? 0xfbbf24 : 0xf97316 });
+        const outline = new THREE.Line(outlineGeo, outlineMat);
+        outline.layers.set(1);
+        this.dynamicGroup.add(outline);
+
+        // 3D: box
+        const boxGeo = new THREE.BoxGeometry(apW * 2, apH, apL * 2);
+        const boxMat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.8 });
+        const box = new THREE.Mesh(boxGeo, boxMat);
+        box.position.set(ap.x, (ap.y || 0) + apH / 2, ap.z || 0);
+        box.layers.set(2);
+        this.dynamicGroup.add(box);
+      });
+    }
+
+    // Render anchors (lines from pole face to anchor point top)
+    if (data.anchors) {
+      data.anchors.forEach((a: any, i: number) => {
+        const isSelected = data.selectedAnchors?.includes(i) ?? false;
+        const isHovered = this.hoveredState?.type === 'anchor' && this.hoveredState?.index === i;
+        const color = isSelected ? 0xfbbf24 : (isHovered ? 0xfde047 : 0xfb923c);
+
+        // 2D: line from pole face to anchor point
+        const geo2d = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(a.px, 1, a.pz),
+          new THREE.Vector3(a.ax, 1, a.az),
+        ]);
+        const mat2d = new THREE.LineBasicMaterial({ color, linewidth: isSelected ? 3 : 2 });
+        const line2d = new THREE.Line(geo2d, mat2d);
+        line2d.layers.set(1);
+        this.dynamicGroup.add(line2d);
+
+        // 3D: line with Y elevation
+        const fixH = a.fixingPointHeight ?? 500;
+        const poleData = data.poles?.[a.poleIdx];
+        const poleY = poleData?.y || 0;
+        const apData = data.anchorPoints?.[a.anchorPointIdx];
+        const apY = apData?.y || 0;
+        const apH = apData?.height ?? 20;
+        const geo3d = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(a.px, poleY + fixH, a.pz),
+          new THREE.Vector3(a.ax, apY + apH, a.az),
+        ]);
+        const mat3d = new THREE.LineBasicMaterial({ color });
+        const line3d = new THREE.Line(geo3d, mat3d);
+        line3d.layers.set(2);
+        this.dynamicGroup.add(line3d);
+
+        // Endpoint dots
+        if (isSelected) {
+          [{ x: a.px, z: a.pz }, { x: a.ax, z: a.az }].forEach(pt => {
+            const cgeo = new THREE.CircleGeometry(120, 16);
+            cgeo.rotateX(-Math.PI / 2);
+            const cmat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(cgeo, cmat);
+            mesh.position.set(pt.x, 1, pt.z);
+            mesh.layers.set(1);
+            this.dynamicGroup.add(mesh);
+          });
+        }
+      });
+    }
   }
 
   private updateLabels() {
@@ -1522,6 +1726,22 @@ export class ViewerEngine {
       });
     }
 
+    if (this.dynData.anchorPoints) {
+      this.dynData.anchorPoints.forEach((ap: any) => {
+        if (ap.label) addLbl(ap.label, new THREE.Vector3(ap.x, (ap.y || 0) + (ap.height ?? 20) + 100, ap.z || 0));
+      });
+    }
+
+    if (this.dynData.anchors) {
+      this.dynData.anchors.forEach((a: any) => {
+        if (a.label) {
+          const mx = (a.px + a.ax) / 2;
+          const mz = (a.pz + a.az) / 2;
+          addLbl(a.label, new THREE.Vector3(mx, 100, mz));
+        }
+      });
+    }
+
     if (this.dynData.vanes) {
       this.dynData.vanes.forEach((v, vi) => {
         if (v.label) {
@@ -1569,13 +1789,12 @@ export class ViewerEngine {
 
   private fitCamera(): void {
     const bbox = new THREE.Box3();
-    this.dataGroup.traverse((obj) => {
-      const line = obj as THREE.Line;
-      if (line.isLine) {
-        line.geometry.computeBoundingBox();
-        if (line.geometry.boundingBox) bbox.union(line.geometry.boundingBox);
-      }
-    });
+    // Include all data-bearing groups: catenary geometry, vanes, and drawn tracks/poles.
+    for (const group of [this.dataGroup, this.vaneDataGroup, this.dynamicGroup]) {
+      if (group.children.length === 0) continue;
+      const gb = new THREE.Box3().setFromObject(group);
+      if (!gb.isEmpty()) bbox.union(gb);
+    }
     if (bbox.isEmpty()) return;
 
     const size = new THREE.Vector3();

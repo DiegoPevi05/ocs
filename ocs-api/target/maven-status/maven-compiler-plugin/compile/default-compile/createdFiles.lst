@@ -19,6 +19,7 @@ com/ocs/api/projects/ProjectController.class
 com/ocs/api/config/WebSocketConfig.class
 com/ocs/api/tracks/Track.class
 com/ocs/api/vanes/VaneRepository.class
+com/ocs/api/projects/ProjectController$ProjectSettingsRequest.class
 com/ocs/api/auth/AuthService.class
 com/ocs/api/auth/AuthController.class
 com/ocs/api/projects/Project.class

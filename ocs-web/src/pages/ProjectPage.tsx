@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, Trash2, Edit3, ArrowLeft, MapPin } from 'lucide-react';
-import { api } from '../lib/api';
-import type { Location, Project } from '../types';
+import { Plus, Trash2, Edit3, ArrowLeft, MapPin, Settings } from 'lucide-react';
+import { api, parseProjectSettings } from '../lib/api';
+import type { Location, Project, ProjectSettings } from '../types';
+import { DEFAULT_PROJECT_SETTINGS } from '../types';
+import { ProjectSettingsPanel } from '../components/ProjectSettingsPanel';
 
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -13,6 +15,8 @@ export default function ProjectPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>(DEFAULT_PROJECT_SETTINGS);
 
   const load = async () => {
     if (!projectId) return;
@@ -24,6 +28,8 @@ export default function ProjectPage() {
       ]);
       setProject(proj);
       setLocations(locs);
+      const parsed = parseProjectSettings(proj);
+      if (parsed) setProjectSettings(parsed);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -69,6 +75,15 @@ export default function ProjectPage() {
           <span style={{ color: '#334155' }}>／</span>
           <span style={{ fontWeight: 600 }}>{project?.name ?? '…'}</span>
         </div>
+        <button
+          onClick={() => setShowSettings(true)}
+          title="Project Settings"
+          style={{ background: 'transparent', border: '1px solid #1e2d45', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 6, fontSize: '0.8rem' }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#e2e8f0'; e.currentTarget.style.borderColor = '#334155'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = '#64748b'; e.currentTarget.style.borderColor = '#1e2d45'; }}
+        >
+          <Settings size={15} /> Settings
+        </button>
       </div>
 
       <div style={{ maxWidth: 960, margin: '0 auto', padding: '40px 24px' }}>
@@ -150,6 +165,23 @@ export default function ProjectPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showSettings && projectId && (
+        <ProjectSettingsPanel
+          settings={projectSettings}
+          onSave={async (updated) => {
+            try {
+              const saved = await api.projects.updateSettings(projectId, updated);
+              const parsed = parseProjectSettings(saved);
+              if (parsed) setProjectSettings(parsed);
+              setShowSettings(false);
+            } catch (e: any) {
+              setError(e.message);
+            }
+          }}
+          onClose={() => setShowSettings(false)}
+        />
       )}
     </div>
   );

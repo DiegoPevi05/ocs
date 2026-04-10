@@ -14,7 +14,7 @@ void RegisterArm::injectSteadyArmHooks(const std::vector<math::Vec3>& hooks) {
 void RegisterArm::injectIntersectionPoint(const math::Vec3& intersection) {
     intersectionRegisterArmFixedPoint = intersection;
     double length = params.hook_end_fitting.L - params.hook_end_fitting.a;
-    hookEndFittingPoint = math::add(bracketUpperFixedPoint, math::scale(dir, length));
+    hookEndFittingPoint = math::subtract(intersectionRegisterArmFixedPoint, math::scale(dir, length));
 }
 
 void RegisterArm::injectIntersectionTubePoint(const math::Vec3& intersection) {
@@ -92,7 +92,7 @@ void RegisterArm::calculateGeometry(const CantileverFrame& frame) {
 
 std::vector<TubeDimension> RegisterArm::generateResults(const CantileverFrame& frame) const {
     if (endPoint.x == 0 && endPoint.y == 0 && endPoint.z == 0) return {};
-    double ra = math::distanceBetween(hookEndFittingPoint, endPoint);
+    double ra = math::distanceBetween(intersectionRegisterArmFixedPoint, endPoint);
     return {
         {"register_arm", params.tube.d, params.tube.s, std::round(ra), std::round(ra) + 10.0}
     };
@@ -119,13 +119,13 @@ std::vector<viewer::Line3D> RegisterArm::getRenderLines() const {
         {
             const double tubeR = params.tube.d / 2.0;
             // Main tube body: bracketUpperFixedPoint → eyeClampPoint → endPoint
-            lines.push_back(viewer::Line3D("Register Arm", bracketUpperFixedPoint, eyeClampPoint, 34, 197, 94, 255, tubeR));
+            //lines.push_back(viewer::Line3D("Register Arm", bracketUpperFixedPoint, eyeClampPoint, 34, 197, 94, 255));
             lines.push_back(viewer::Line3D("Register Arm", endPoint, eyeClampPoint,              34, 197, 94, 255, tubeR));
             // Fittings / wires
             lines.push_back(viewer::Line3D("Register Arm", eyeClampFixedPoint, eyeClampPoint, 34, 197, 94, 255));
             lines.push_back(viewer::Line3D("Register Arm", eyeClampFixedPoint, wireSupportStainlessSteelPoint, 34, 197, 94, 255));
-            lines.push_back(viewer::Line3D("Register Arm", bracketUpperFixedPoint, hookEndFittingPoint, 34, 197, 94, 255));
-            lines.push_back(viewer::Line3D("Register Arm", hookEndFittingPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
+            //lines.push_back(viewer::Line3D("Register Arm", bracketUpperFixedPoint, hookEndFittingPoint, 34, 197, 94, 255));
+            lines.push_back(viewer::Line3D("Register Arm", intersectionRegisterArmFixedPoint, eyeClampPoint, 34, 197, 94, 255, tubeR));
             lines.push_back(viewer::Line3D("Register Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
         }
     }

@@ -18,9 +18,11 @@ public class ProjectController {
 
     record ProjectRequest(String name, String description) {}
 
-    record ProjectResponse(UUID id, String name, String description, LocalDateTime createdAt) {
+    record ProjectSettingsRequest(String settings) {}
+
+    record ProjectResponse(UUID id, String name, String description, String settings, LocalDateTime createdAt) {
         static ProjectResponse from(Project p) {
-            return new ProjectResponse(p.getId(), p.getName(), p.getDescription(), p.getCreatedAt());
+            return new ProjectResponse(p.getId(), p.getName(), p.getDescription(), p.getSettings(), p.getCreatedAt());
         }
     }
 
@@ -52,6 +54,14 @@ public class ProjectController {
         return projectRepository.findById(id).map(p -> {
             p.setName(req.name());
             p.setDescription(req.description());
+            return ResponseEntity.ok(ProjectResponse.from(projectRepository.save(p)));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/{id}/settings")
+    public ResponseEntity<ProjectResponse> updateSettings(@PathVariable UUID id, @RequestBody ProjectSettingsRequest req) {
+        return projectRepository.findById(id).map(p -> {
+            p.setSettings(req.settings());
             return ResponseEntity.ok(ProjectResponse.from(projectRepository.save(p)));
         }).orElse(ResponseEntity.notFound().build());
     }

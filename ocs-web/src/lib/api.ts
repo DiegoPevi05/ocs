@@ -75,7 +75,7 @@ export function parseProjectSettings(project: Project): ProjectSettings | null {
   } else {
     try { parsed = JSON.parse(project.settings as unknown as string); } catch { return null; }
   }
-  
+
   return {
     ...DEFAULT_PROJECT_SETTINGS,
     ...parsed,

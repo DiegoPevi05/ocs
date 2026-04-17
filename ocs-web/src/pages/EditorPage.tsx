@@ -444,7 +444,7 @@ export default function EditorPage() {
   // Auto-fit camera in 2D whenever tracks or poles are added (runs after geometry update above).
   useEffect(() => {
     engineRef.current?.resetCamera();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedTracks.length, poles.length]);
 
   // Sync zigzag to engine for preview

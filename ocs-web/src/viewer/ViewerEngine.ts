@@ -809,7 +809,7 @@ export class ViewerEngine {
       if (this.coordsEl) {
         const rect = this.container.getBoundingClientRect();
         this.coordsEl.style.left = `${e.clientX - rect.left + 20}px`;
-        this.coordsEl.style.top  = `${e.clientY - rect.top  + 20}px`;
+        this.coordsEl.style.top = `${e.clientY - rect.top + 20}px`;
       }
 
       this.updateRubberband(finalX, finalZ);
@@ -970,7 +970,7 @@ export class ViewerEngine {
   private makeApiLine(apiLine: ApiLine): THREE.Object3D {
     // Calculator Z axis is opposite to viewer Z axis — negate Z when mapping.
     const start = new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]);
-    const end   = new THREE.Vector3(apiLine.end[0],   apiLine.end[1],   -apiLine.end[2]);
+    const end = new THREE.Vector3(apiLine.end[0], apiLine.end[1], -apiLine.end[2]);
     const color = rgbaToHex(apiLine.color);
 
     let obj: THREE.Object3D;
@@ -989,7 +989,7 @@ export class ViewerEngine {
         const mid = start.clone().add(end).multiplyScalar(0.5);
         mesh.position.copy(mid);
         const dir = end.clone().sub(start).normalize();
-        const up  = new THREE.Vector3(0, 1, 0);
+        const up = new THREE.Vector3(0, 1, 0);
         const axis = new THREE.Vector3().crossVectors(up, dir);
         if (axis.length() > 1e-6) {
           mesh.quaternion.setFromAxisAngle(axis.normalize(), Math.acos(up.dot(dir)));

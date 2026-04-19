@@ -129,6 +129,7 @@ export class ViewerEngine {
     dl.position.set(5000, 10000, 8000);
     this.scene.add(dl);
 
+
     this.coordsEl = this.buildCoordsDisplay();
 
     this._onMM = this.onMouseMove.bind(this);
@@ -179,7 +180,8 @@ export class ViewerEngine {
     const { offsetWidth: w, offsetHeight: h } = this.container;
     const cam = new THREE.PerspectiveCamera(55, w / h, 1, 500000);
     cam.position.set(8000, 10000, 25000);
-    cam.lookAt(1500, 6000, 10000);
+    cam.lookAt(1500, 6000, 0);
+    cam.layers.set(0);
     cam.layers.enable(2);
     return cam;
   }
@@ -968,9 +970,9 @@ export class ViewerEngine {
   }
 
   private makeApiLine(apiLine: ApiLine): THREE.Object3D {
-    // Calculator Z axis is opposite to viewer Z axis — negate Z when mapping.
-    const start = new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]);
-    const end = new THREE.Vector3(apiLine.end[0], apiLine.end[1], -apiLine.end[2]);
+    // 3D scene uses Z = -z_editor; backend already sends z_backend = -z_editor, so pass through directly.
+    const start = new THREE.Vector3(apiLine.start[0], apiLine.start[1], apiLine.start[2]);
+    const end = new THREE.Vector3(apiLine.end[0], apiLine.end[1], apiLine.end[2]);
     const color = rgbaToHex(apiLine.color);
 
     let obj: THREE.Object3D;
@@ -1368,12 +1370,12 @@ export class ViewerEngine {
       this.dynamicGroup.remove(this.dynamicGroup.children[0]);
     }
 
-    const renderTrack = (trackArr: { x: number, z: number, y?: number, r?: number }[], isActive: boolean, isSelected: boolean, trackIdx?: number) => {
-      if (trackArr.length === 0) return;
+    // Build point array for a track, sampling arcs. zSign=1 for 2D (editor Z), zSign=-1 for 3D (scene Z).
+    const buildTrackPts = (trackArr: { x: number, z: number, y?: number, r?: number }[], zSign: number): THREE.Vector3[] => {
       const pts: THREE.Vector3[] = [];
       trackArr.forEach((curr, i) => {
         if (i === 0 || !curr.r) {
-          pts.push(new THREE.Vector3(curr.x, curr.y || 0, curr.z));
+          pts.push(new THREE.Vector3(curr.x, curr.y || 0, curr.z * zSign));
           return;
         }
         const prev = trackArr[i - 1];
@@ -1388,7 +1390,6 @@ export class ViewerEngine {
           const sign = curr.r > 0 ? 1 : -1;
           const cx = mx - uz * h * sign;
           const cz = mz + ux * h * sign;
-
           const startA = Math.atan2(prev.z - cz, prev.x - cx);
           const endA = Math.atan2(curr.z - cz, curr.x - cx);
           const clockWise = curr.r < 0;
@@ -1398,29 +1399,50 @@ export class ViewerEngine {
           const currY = curr.y || 0;
           for (let j = 1; j < arcPts.length; j++) {
             const fraction = j / (arcPts.length - 1);
-            pts.push(new THREE.Vector3(arcPts[j].x, prevY + fraction * (currY - prevY), arcPts[j].y));
+            // EllipseCurve gives (x, y) in editor XZ — arcPts[j].y = editor Z
+            pts.push(new THREE.Vector3(arcPts[j].x, prevY + fraction * (currY - prevY), arcPts[j].y * zSign));
           }
         } else {
-          pts.push(new THREE.Vector3(curr.x, curr.y || 0, curr.z));
+          pts.push(new THREE.Vector3(curr.x, curr.y || 0, curr.z * zSign));
         }
       });
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      return pts;
+    };
+
+    const renderTrack = (trackArr: { x: number, z: number, y?: number, r?: number }[], isActive: boolean, isSelected: boolean, trackIdx?: number) => {
+      if (trackArr.length === 0) return;
 
       const isHovered = trackIdx !== undefined && this.hoveredState?.type === 'track' && this.hoveredState?.index === trackIdx;
       const trackColor = isSelected ? 0xffa500 : (isHovered ? 0xfef08a : (isActive ? 0x3b82f6 : 0x1d4ed8));
       const nodeColor = isSelected ? 0xfef08a : (isHovered ? 0xfef08a : (isActive ? 0x93c5fd : 0x60a5fa));
 
-      const mat = new THREE.LineBasicMaterial({ color: trackColor });
-      this.dynamicGroup.add(new THREE.Line(geo, mat));
+      // 2D (layer 1): editor Z
+      const line2d = new THREE.Line(new THREE.BufferGeometry().setFromPoints(buildTrackPts(trackArr, 1)), new THREE.LineBasicMaterial({ color: trackColor }));
+      line2d.layers.set(1);
+      this.dynamicGroup.add(line2d);
 
-      // Draw points for track nodes
+      // 3D (layer 2): negated Z so +z_editor is far from camera = top of 3D view
+      const line3d = new THREE.Line(new THREE.BufferGeometry().setFromPoints(buildTrackPts(trackArr, -1)), new THREE.LineBasicMaterial({ color: trackColor }));
+      line3d.layers.set(2);
+      this.dynamicGroup.add(line3d);
+
+      // Node dots
       trackArr.forEach((p) => {
-        const cgeo = new THREE.CircleGeometry(80, 16);
-        cgeo.rotateX(-Math.PI / 2); // lie flat in XZ plane
-        const cmat = new THREE.MeshBasicMaterial({ color: nodeColor, side: THREE.DoubleSide });
-        const mesh = new THREE.Mesh(cgeo, cmat);
-        mesh.position.set(p.x, p.y || 0, p.z);
-        this.dynamicGroup.add(mesh);
+        const dot2d = new THREE.Mesh(
+          (() => { const g = new THREE.CircleGeometry(80, 16); g.rotateX(-Math.PI / 2); return g; })(),
+          new THREE.MeshBasicMaterial({ color: nodeColor, side: THREE.DoubleSide }),
+        );
+        dot2d.position.set(p.x, p.y || 0, p.z);
+        dot2d.layers.set(1);
+        this.dynamicGroup.add(dot2d);
+
+        const dot3d = new THREE.Mesh(
+          (() => { const g = new THREE.CircleGeometry(80, 16); g.rotateX(-Math.PI / 2); return g; })(),
+          new THREE.MeshBasicMaterial({ color: nodeColor, side: THREE.DoubleSide }),
+        );
+        dot3d.position.set(p.x, p.y || 0, -(p.z));
+        dot3d.layers.set(2);
+        this.dynamicGroup.add(dot3d);
       });
     };
 
@@ -1468,7 +1490,7 @@ export class ViewerEngine {
         geo.translate(0, poleH / 2, 0);
         mesh3d = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: poleColor }));
       }
-      mesh3d.position.set(p.x, p.y || 0, p.z);
+      mesh3d.position.set(p.x, p.y || 0, -(p.z || 0));
       mesh3d.layers.set(2);
       this.dynamicGroup.add(mesh3d);
     });
@@ -1581,7 +1603,7 @@ export class ViewerEngine {
         const boxGeo = new THREE.BoxGeometry(apW * 2, apH, apL * 2);
         const boxMat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.8 });
         const box = new THREE.Mesh(boxGeo, boxMat);
-        box.position.set(ap.x, (ap.y || 0) + apH / 2, ap.z || 0);
+        box.position.set(ap.x, (ap.y || 0) + apH / 2, -(ap.z || 0));
         box.layers.set(2);
         this.dynamicGroup.add(box);
       });
@@ -1612,8 +1634,8 @@ export class ViewerEngine {
         const apY = apData?.y || 0;
         const apH = apData?.height ?? 20;
         const geo3d = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(a.px, poleY + fixH, a.pz),
-          new THREE.Vector3(a.ax, apY + apH, a.az),
+          new THREE.Vector3(a.px, poleY + fixH, -a.pz),
+          new THREE.Vector3(a.ax, apY + apH, -a.az),
         ]);
         const mat3d = new THREE.LineBasicMaterial({ color });
         const line3d = new THREE.Line(geo3d, mat3d);
@@ -1665,8 +1687,11 @@ export class ViewerEngine {
       this.labelsContainer.appendChild(div);
     };
 
+    // In 3D mode all scene objects use Z = -z_editor; labels must project from scene coords.
+    const sz = (z: number) => this.viewMode === '3D' ? -z : z;
+
     this.dynData.poles.forEach(p => {
-      if (p.label) addLbl(`${p.label} (H: ${Math.round(p.h || 3000)})`, new THREE.Vector3(p.x + 400, (p.y || 0) + (p.h || 3000) + 200, p.z));
+      if (p.label) addLbl(`${p.label} (H: ${Math.round(p.h || 3000)})`, new THREE.Vector3(p.x + 400, (p.y || 0) + (p.h || 3000) + 200, sz(p.z || 0)));
     });
 
     if (this.dynData.completedTracks) {
@@ -1674,7 +1699,7 @@ export class ViewerEngine {
         if (tr.length > 0 && tr[0].label) {
           const mid = Math.floor(tr.length / 2);
           const p = tr[mid];
-          addLbl(tr[0].label, new THREE.Vector3(p.x, (p.y || 0) + 100, p.z));
+          addLbl(tr[0].label, new THREE.Vector3(p.x, (p.y || 0) + 100, sz(p.z)));
         }
       });
     }
@@ -1684,7 +1709,6 @@ export class ViewerEngine {
         const rawX = c.x2raw ?? c.x2;
         const rawZ = c.z2raw ?? c.z2;
 
-        // Recompute finalX/finalZ the same way the renderer does
         const dx = rawX - c.x1;
         const dz = rawZ - c.z1;
         const len = Math.hypot(dx, dz);
@@ -1695,11 +1719,9 @@ export class ViewerEngine {
           finalZ = rawZ + (dz / len) * zz;
         }
 
-        // Midpoint of the arm
         const mx = (c.x1 + finalX) / 2;
         const mz = (c.z1 + finalZ) / 2;
 
-        // Perpendicular offset (rotate arm 90°): (-dz, dx) normalised × 400
         const perpOffset = 400;
         let px = 0, pz = 0;
         if (len > 0) {
@@ -1707,16 +1729,12 @@ export class ViewerEngine {
           pz = (dx / len) * perpOffset;
         }
 
-        // Cantilever name label — offset to one side perpendicular to arm
         if (c.label) {
-          addLbl(c.label, new THREE.Vector3(mx + px, 100, mz + pz));
+          addLbl(c.label, new THREE.Vector3(mx + px, 100, sz(mz + pz)));
         }
 
-        // Zigzag distance label — at the end of the arm, rotated to read along the arm
         if (this.viewMode === '2D') {
           const zz = (c as any).zigzag ?? 250;
-          // Angle: world XZ → screen. Top-down camera: X→right, Z→up on screen.
-          // atan2 of (dz, dx) gives the arm angle; negate dz because Z is inverted on screen.
           const angleDeg = Math.atan2(-dz, dx) * (180 / Math.PI);
           const labelOffset = 400;
           const lblX = len > 0 ? finalX + (dx / len) * labelOffset : finalX;
@@ -1728,7 +1746,7 @@ export class ViewerEngine {
 
     if (this.dynData.anchorPoints) {
       this.dynData.anchorPoints.forEach((ap: any) => {
-        if (ap.label) addLbl(ap.label, new THREE.Vector3(ap.x, (ap.y || 0) + (ap.height ?? 20) + 100, ap.z || 0));
+        if (ap.label) addLbl(ap.label, new THREE.Vector3(ap.x, (ap.y || 0) + (ap.height ?? 20) + 100, sz(ap.z || 0)));
       });
     }
 
@@ -1737,7 +1755,7 @@ export class ViewerEngine {
         if (a.label) {
           const mx = (a.px + a.ax) / 2;
           const mz = (a.pz + a.az) / 2;
-          addLbl(a.label, new THREE.Vector3(mx, 100, mz));
+          addLbl(a.label, new THREE.Vector3(mx, 100, sz(mz)));
         }
       });
     }
@@ -1747,9 +1765,7 @@ export class ViewerEngine {
         if (v.label) {
           let labelPos: THREE.Vector3 | null = null;
 
-          // In 3D view, collect all ContactWire vertices from the matching vane
-          // group (keyed by vane index, matching _vaneIdx used in loadVaneLines)
-          // and place the label at the bounding-box centre of the full wire.
+          // In 3D: vane API lines are already in scene coords (Z=-z_editor), read bbox directly.
           if (this.viewMode === '3D') {
             const group = this.vaneGroups.get(vi.toString());
             if (group) {
@@ -1773,10 +1789,9 @@ export class ViewerEngine {
             }
           }
 
-          // Fallback: flat XZ midpoint (used for 2D or when contact_wire not found)
           if (!labelPos) {
             const mx = (v.x1 + v.x2) / 2, mz = (v.z1 + v.z2) / 2;
-            labelPos = new THREE.Vector3(mx, 120, mz);
+            labelPos = new THREE.Vector3(mx, 120, sz(mz));
           }
 
           addLbl(v.label, labelPos);
@@ -1788,44 +1803,59 @@ export class ViewerEngine {
   // ─── Camera fit ───────────────────────────────────────────────────────────────
 
   private fitCamera(): void {
-    const bbox = new THREE.Box3();
-    // Include all data-bearing groups: catenary geometry, vanes, and drawn tracks/poles.
-    for (const group of [this.dataGroup, this.vaneDataGroup, this.dynamicGroup]) {
-      if (group.children.length === 0) continue;
-      const gb = new THREE.Box3().setFromObject(group);
-      if (!gb.isEmpty()) bbox.union(gb);
-    }
-    if (bbox.isEmpty()) return;
+    // Collect bounds in editor coordinates (z_editor) from dynamic data.
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = 0;
+    const addPt = (x: number, z: number, y = 0) => {
+      if (!isFinite(x) || !isFinite(z)) return;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      maxY = Math.max(maxY, y);
+    };
+    this.dynData.completedTracks?.forEach((tr: any) => tr.forEach((p: any) => addPt(p.x, p.z)));
+    this.dynData.trackPoints?.forEach((p: any) => addPt(p.x, p.z));
+    this.dynData.poles?.forEach((p: any) => addPt(p.x, p.z || 0, p.h || 3000));
 
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    bbox.getSize(size);
-    bbox.getCenter(center);
+    if (minX === Infinity) return;
+
+    const centerX = (minX + maxX) / 2;
+    const centerZ = (minZ + maxZ) / 2;   // editor Z
+    const sizeX = maxX - minX;
+    const sizeZ = maxZ - minZ;
+    const maxDim = Math.max(sizeX, maxY, sizeZ, 1000);
 
     const pad = 1.25;
     const { offsetWidth: w, offsetHeight: h } = this.container;
     const aspect = w / h;
 
-    // 2D orthographic: fit XZ plan view (X horizontal, Z vertical, Y = height)
-    const neededH = Math.max(size.x / aspect, size.z) * pad;
+    // 2D orthographic: editor Z is "up" on screen
+    const neededH = Math.max(sizeX / aspect, sizeZ) * pad;
     this.cam2D.left = -neededH * aspect / 2;
     this.cam2D.right = neededH * aspect / 2;
     this.cam2D.top = neededH / 2;
     this.cam2D.bottom = -neededH / 2;
     this.cam2D.zoom = 1;
-    this.cam2D.position.set(center.x, -1e5, center.z);  // below XZ plane, looking up
+    this.cam2D.position.set(centerX, -1e5, centerZ);
     this.cam2D.updateProjectionMatrix();
 
-    // 3D perspective: pull back to see full scene
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const dist = maxDim * 1.5;
+    // 3D: scene Z = -z_editor; camera at positive scene-Z side (+X right on screen).
+    const sceneCenterZ = -centerZ;
+    // Railway scenes in mm can be very elongated (long track, short height).
+    // Use pole height to set a comfortable close-up distance rather than full track length.
+    const poleH = Math.max(maxY, 3000);
+    const dist = Math.max(poleH * 6, 30000);
+    const camHeight = poleH * 2.5 + 10000;
+    // Extend far plane to cover the whole scene from this vantage point.
+    const sceneRadius = Math.sqrt(sizeX * sizeX + sizeZ * sizeZ) / 2 + dist;
+    this.cam3D.far = Math.max(sceneRadius * 3, dist * 10);
+    this.cam3D.near = Math.max(1, dist * 0.001);
+    this.cam3D.updateProjectionMatrix();
     this.cam3D.position.set(
-      center.x + dist * 0.55,
-      center.y + dist * 0.45,
-      center.z + dist * 1.1,
+      centerX + dist * 0.4,
+      camHeight,
+      sceneCenterZ + dist,
     );
-    this.cam3D.lookAt(center.x, center.y, center.z);
-    this.controls.target.copy(center);
+    this.cam3D.lookAt(centerX, poleH * 0.5, sceneCenterZ);
+    this.controls.target.set(centerX, poleH * 0.5, sceneCenterZ);
     this.controls.update();
   }
 
@@ -1843,6 +1873,8 @@ export class ViewerEngine {
       // Disable our wheel/mousedown for pan — OrbitControls takes over
       this.container.removeEventListener('wheel', this._onWH);
       this.container.removeEventListener('mousedown', this._onMD);
+      this._renderDynamic();
+      this.fitCamera();
     } else {
       this.controls.enabled = false;
       this.gridGroup.visible = true;
@@ -1895,9 +1927,10 @@ export class ViewerEngine {
 
     const viewDistance = 3500;
 
-    this.cam3D.position.set(cx + px * viewDistance, cy, cz + pz * viewDistance);
-    this.cam3D.lookAt(cx, cy, cz);
-    this.controls.target.set(cx, cy, cz);
+    // Scene Z = -editor Z
+    this.cam3D.position.set(cx + px * viewDistance, cy, -(cz + pz * viewDistance));
+    this.cam3D.lookAt(cx, cy, -cz);
+    this.controls.target.set(cx, cy, -cz);
     this.controls.update();
   }
 
@@ -1934,9 +1967,10 @@ export class ViewerEngine {
     // Pull the camera back enough to see the full vane span + some vertical room
     const viewDistance = Math.max(vaneLen * 0.6, 4000);
 
-    this.cam3D.position.set(cx + nx * viewDistance, cy + 1500, cz + nz * viewDistance);
-    this.cam3D.lookAt(cx, cy, cz);
-    this.controls.target.set(cx, cy, cz);
+    // Scene Z = -editor Z
+    this.cam3D.position.set(cx + nx * viewDistance, cy + 1500, -(cz + nz * viewDistance));
+    this.cam3D.lookAt(cx, cy, -cz);
+    this.controls.target.set(cx, cy, -cz);
     this.controls.update();
   }
 
@@ -1962,8 +1996,8 @@ export class ViewerEngine {
     lines.forEach((apiLine) => {
       // Override color to purple family for vane lines
       const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(apiLine.start[0], apiLine.start[1], -apiLine.start[2]),
-        new THREE.Vector3(apiLine.end[0], apiLine.end[1], -apiLine.end[2]),
+        new THREE.Vector3(apiLine.start[0], apiLine.start[1], apiLine.start[2]),
+        new THREE.Vector3(apiLine.end[0], apiLine.end[1], apiLine.end[2]),
       ]);
       const mat = new THREE.LineBasicMaterial({ color: rgbaToHex(apiLine.color) });
       const line = new THREE.Line(geo, mat);

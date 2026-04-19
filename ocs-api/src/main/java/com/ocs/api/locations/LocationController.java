@@ -113,7 +113,7 @@ public class LocationController {
                     com.fasterxml.jackson.databind.node.ObjectNode p = mapper.createObjectNode();
                     p.put("configuration", c.path("configuration").asText("TDP>2.2"));
                     p.put("contactWireConfiguration", finalWireConfig);
-                    com.fasterxml.jackson.databind.node.ArrayNode pp = mapper.createArrayNode(); pp.add(x1).add(0.0).add(z1); p.set("polePosition", pp);
+                    com.fasterxml.jackson.databind.node.ArrayNode pp = mapper.createArrayNode(); pp.add(x1).add(0.0).add(-z1); p.set("polePosition", pp);
                     double fx = c.has("x2raw") ? c.path("x2raw").asDouble() : c.path("x2").asDouble();
                     double fz = c.has("z2raw") ? c.path("z2raw").asDouble() : c.path("z2").asDouble();
                     com.fasterxml.jackson.databind.node.ArrayNode pv = mapper.createArrayNode(); pv.add(fx).add(0.0).add(-fz); p.set("pv", pv);

@@ -281,7 +281,7 @@ export default function EditorPage() {
       }
     };
 
-    fetch(`/api/locations/${locationId}/calculated`)
+    fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http//localhost:8080'}` + `/api/locations/${locationId}/calculated`)
       .then(r => r.json())
       .then((res: CalcLocationResponse) => {
         if (res.status !== 'success') {
@@ -478,7 +478,7 @@ export default function EditorPage() {
         return {
           configuration: c.configuration ?? 'TDP>2.2',
           contactWireConfiguration: c.contactWireConfiguration ?? projectWireConfig,
-          polePosition: [c.x1, 0, c.z1],
+          polePosition: [c.x1, 0, -c.z1],
           pv: [footX, 0, -footZ],
           contactWireHeight: c.contactWireHeight ?? 5400,
           systemHeight: c.systemHeight ?? 1000,

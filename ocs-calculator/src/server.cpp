@@ -379,8 +379,8 @@ int main() {
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
     });
 
-    std::cout << "Starting C++ Catenary REST API on port 8081..." << std::endl;
-    svr.listen("0.0.0.0", 8081);
+    std::cout << "Starting C++ Catenary REST API on port 8080..." << std::endl;
+    svr.listen("0.0.0.0", 8080);
 
     return 0;
 }

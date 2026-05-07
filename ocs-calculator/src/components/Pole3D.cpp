@@ -16,7 +16,9 @@ Pole3D::Pole3D(const std::optional<components::PoleProperties>& poleProps, compo
 
 void Pole3D::calculateGeometries(const math::Vec3& globalPv) {
     if (pov == components::Pov::GLOBAL) {
-        polePosition = { globalPosition.x, 0, -globalPosition.z };
+        // Input z is already negated by the frontend (z_scene = -z_editor),
+        // so use it directly without further negation.
+        polePosition = { globalPosition.x, 0, globalPosition.z };
     } else {
         polePosition = { 0, 0, globalPosition.z };
     }
@@ -24,7 +26,8 @@ void Pole3D::calculateGeometries(const math::Vec3& globalPv) {
 
 math::Vec3 Pole3D::getAdjustedPv(const math::Vec3& globalPv) const {
     if (pov == components::Pov::GLOBAL) {
-        return { globalPv.x, 0, -globalPv.z };
+        // Input z is already negated by the frontend (z_scene = -z_editor).
+        return { globalPv.x, 0, globalPv.z };
     } else {
         double pvL = math::distanceBetween({globalPosition.x, globalPosition.y, globalPosition.z}, globalPv);
         return { pvL, 0, 0 };

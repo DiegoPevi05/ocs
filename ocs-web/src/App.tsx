@@ -508,7 +508,7 @@ export default function App() {
                   if (!lbl) { alert('Label is required'); return; }
                   setCantilevers(prev => [...prev, { ...cantileverModal!, label: lbl }]);
                   setCantileverModal(null);
-                }}>Save</button>
+                }}>Guardar</button>
               </div>
             </div>
           </div>

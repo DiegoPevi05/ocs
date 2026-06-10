@@ -320,7 +320,7 @@ export default function EditorPage() {
                 if (!seenVanes.has(vane.vaneIndex)) {
                   seenVanes.add(vane.vaneIndex);
                   if (vane.lines.length > 0)
-                    engineRef.current?.loadVaneLines(vane.lines, vane.vaneIndex.toString());
+                    engineRef.current?.loadVaneLines(vane.lines, vane.vaneIndex.toString(), vane.results);
                 }
               }
             }
@@ -393,7 +393,7 @@ export default function EditorPage() {
           const data = JSON.parse(msg.body);
           if (data.status === 'success' && data.vane && data._vaneIdx !== undefined) {
             const vIdx: number = data._vaneIdx;
-            engineRef.current?.loadVaneLines(data.vane.lines || [], vIdx.toString());
+            engineRef.current?.loadVaneLines(data.vane.lines || [], vIdx.toString(), data.vane.results || []);
 
             // Update vane cache
             const vScene = vanesRef.current[vIdx];
@@ -505,7 +505,7 @@ export default function EditorPage() {
 
   useEffect(() => { triggerCalculation(cantilevers); }, [cantilevers, triggerCalculation]);
 
-  const triggerVaneCalculation = useCallback((vaneList: VaneData[], cantList: CantileverData[]) => {
+  const triggerVaneCalculation = useCallback((vaneList: VaneData[], cantList: CantileverData[], startIndex: number = 0) => {
     if (!stompRef.current?.connected) return;
     vaneList.forEach((v, vIdx) => {
       const c1 = cantList[v.cantileverIdx1];
@@ -519,7 +519,7 @@ export default function EditorPage() {
       const cwo2 = c2.contactWireVerticalOffset ?? 120;
       // cwAxis.y = contactWireHeight + contactWireVerticalOffset (invert(viaDir) = up)
       const payload = {
-        _vaneIdx: vIdx,
+        _vaneIdx: startIndex + vIdx,
         cw_start: [c1.x2, cwH1 + cwo1, -c1.z2],
         sw_start: [c1.x2, cwH1 + cwo1 + sysH1, -c1.z2],
         cw_end: [c2.x2, cwH2 + cwo2, -c2.z2],
@@ -552,15 +552,12 @@ export default function EditorPage() {
     aList = anchorsRef.current,
   ) => {
     if (!locationId || !location) return;
-    const labelMap = new Map<string, { x: number; z: number; y?: number; r?: number; label?: string }[]>();
-    tracks.forEach(tr => {
-      const lbl = (tr[0] as any)?.label ?? '';
-      if (!labelMap.has(lbl)) labelMap.set(lbl, []);
-      labelMap.get(lbl)!.push(...tr);
-    });
-    const trackData = Array.from(labelMap.entries()).map(([label, pts]) => ({
-      label, points: pts.map(({ label: _l, ...rest }) => rest),
+
+    const trackData: TrackData[] = tracks.map(tr => ({
+      label: tr[0]?.label ?? '',
+      points: tr.map(({ label: _l, ...rest }) => rest),
     }));
+
     const scene: SceneData = { tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList, anchorPoints: apList, anchors: aList };
     setSaving(true); setSaveError(null);
     try {
@@ -734,12 +731,38 @@ export default function EditorPage() {
       const selV = new Set<number>();
       const selAP = new Set<number>();
       const selA = new Set<number>();
+
       const inB = (x: number, z: number) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
+
+      const lineInB = (x1: number, z1: number, x2: number, z2: number) => {
+        if (inB(x1, z1) || inB(x2, z2)) return true;
+        let tmin = 0, tmax = 1;
+        const dx = x2 - x1, dz = z2 - z1;
+        for (let i = 0; i < 2; i++) {
+          let t1, t2;
+          if (i === 0) {
+            if (dx === 0) { if (x1 < minX || x1 > maxX) return false; continue; }
+            t1 = (minX - x1) / dx; t2 = (maxX - x1) / dx;
+          } else {
+            if (dz === 0) { if (z1 < minZ || z1 > maxZ) return false; continue; }
+            t1 = (minZ - z1) / dz; t2 = (maxZ - z1) / dz;
+          }
+          tmin = Math.max(tmin, Math.min(t1, t2));
+          tmax = Math.min(tmax, Math.max(t1, t2));
+        }
+        return tmin <= tmax;
+      };
+
       const matchedLabels = new Set<string>();
 
       if (selFilterRef.current.tracks) {
         completedTracksRef.current.forEach((tr, i) => {
           if (tr.some(p => inB(p.x, p.z))) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); }
+          else {
+            for (let j = 1; j < tr.length; j++) {
+              if (lineInB(tr[j - 1].x, tr[j - 1].z, tr[j].x, tr[j].z)) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); break; }
+            }
+          }
         });
         completedTracksRef.current.forEach((tr, i) => {
           if (tr[0]?.label && matchedLabels.has(tr[0].label)) selT.add(i);
@@ -752,12 +775,12 @@ export default function EditorPage() {
       }
       if (selFilterRef.current.cantilevers) {
         cantileversRef.current.forEach((c, i) => {
-          if (inB(c.x1, c.z1) || inB(c.x2, c.z2)) selC.add(i);
+          if (lineInB(c.x1, c.z1, c.x2, c.z2)) selC.add(i);
         });
       }
       if (selFilterRef.current.vanes) {
         vanesRef.current.forEach((v, i) => {
-          if (inB(v.x1, v.z1) || inB(v.x2, v.z2)) selV.add(i);
+          if (lineInB(v.x1, v.z1, v.x2, v.z2)) selV.add(i);
         });
       }
       if (selFilterRef.current.anchorPoints) {
@@ -767,7 +790,7 @@ export default function EditorPage() {
       }
       if (selFilterRef.current.anchors) {
         anchorsRef.current.forEach((a, i) => {
-          if (inB(a.px, a.pz) || inB(a.ax, a.az)) selA.add(i);
+          if (lineInB(a.px, a.pz, a.ax, a.az)) selA.add(i);
         });
       }
       setSelectedTracks(Array.from(selT));
@@ -1008,6 +1031,7 @@ export default function EditorPage() {
     setLastVaneResults(cachedVane?.results ?? null);
     editVaneIdxRef.current = idx;
     setEditVaneIdx(idx);
+    engineRef.current?.setEditingVane(idx.toString());
     // Switch to 3D front-elevation view looking perpendicular to the vane
     const c1 = cantilevers[v.cantileverIdx1];
     const c2 = cantilevers[v.cantileverIdx2];
@@ -1021,7 +1045,7 @@ export default function EditorPage() {
   const handleCalculateVane = (updatedVane: VaneData) => {
     if (editVaneIdx === null) return;
     const tempVane = { ...updatedVane };
-    triggerVaneCalculation([tempVane], cantilevers);
+    triggerVaneCalculation([tempVane], cantilevers, editVaneIdx);
   };
 
   const saveEditVane = (updatedVane?: VaneData) => {
@@ -1034,11 +1058,12 @@ export default function EditorPage() {
         ? { ...next[editVaneIdx], ...updatedVane }
         : { ...next[editVaneIdx], label: vaneFormLabel.trim(), qtyDroppers: vaneFormDroppers, initialSeparation: vaneFormInitialSep };
       saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, next);
-      triggerVaneCalculation([next[editVaneIdx]], cantileversRef.current);
+      triggerVaneCalculation([next[editVaneIdx]], cantileversRef.current, editVaneIdx);
       return next;
     });
     editVaneIdxRef.current = null;
     setEditVaneIdx(null);
+    engineRef.current?.setEditingVane(null);
     setSelectedVanes([]);
     setLastVaneResults(null);
     setViewMode('2D');
@@ -1281,10 +1306,11 @@ export default function EditorPage() {
                       <thead>
                         <tr>
                           <th>#</th>
-                          <th>Dropper (mm)</th>
-                          <th>Eye-Eye (mm)</th>
-                          <th>CW Dist (mm)</th>
-                          <th>Pole Dist (mm)</th>
+                          <th>Dropper (m)</th>
+                          <th>Eye-Eye (m)</th>
+                          <th>CW Dist (m)</th>
+                          <th>Pole Dist (m)</th>
+                          <th>CW Height (m)</th>
                           <th>Tilt (°)</th>
                         </tr>
                       </thead>
@@ -1292,10 +1318,11 @@ export default function EditorPage() {
                         {lastVaneResults.map((r, i) => (
                           <tr key={i}>
                             <td style={{ color: '#9333ea' }}>{r.index ?? i + 1}</td>
-                            <td>{r.dropper_length.toFixed(1)}</td>
-                            <td>{r.distance_eye_to_eye.toFixed(1)}</td>
-                            <td>{r.distance_cw.toFixed(1)}</td>
-                            <td>{r.distance_pole_dropper.toFixed(1)}</td>
+                            <td>{r.dropper_length.toFixed(3)}</td>
+                            <td>{r.distance_eye_to_eye.toFixed(3)}</td>
+                            <td>{r.distance_cw.toFixed(3)}</td>
+                            <td>{r.distance_pole_dropper.toFixed(2)}</td>
+                            <td>{r.distance_cw_h.toFixed(3)}</td>
                             <td>{r.dropper_inclination.toFixed(2)}</td>
                           </tr>
                         ))}
@@ -1439,6 +1466,7 @@ export default function EditorPage() {
             onClose={() => {
               editVaneIdxRef.current = null;
               setEditVaneIdx(null);
+              engineRef.current?.setEditingVane(null);
               setLastVaneResults(null);
               setSelectedVanes([]);
               setViewMode('2D');

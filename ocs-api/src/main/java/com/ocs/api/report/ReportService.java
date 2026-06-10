@@ -129,12 +129,15 @@ public class ReportService {
                 }
                 JsonNode c1 = cArr[c1i], c2 = cArr[c2i];
                 double cwH1 = c1.path("contactWireHeight").asDouble(5400), sH1 = c1.path("systemHeight").asDouble(1000);
+                double cwo1 = c1.path("contactWireVerticalOffset").asDouble(120);
                 double cwH2 = c2.path("contactWireHeight").asDouble(5400), sH2 = c2.path("systemHeight").asDouble(1000);
+                double cwo2 = c2.path("contactWireVerticalOffset").asDouble(120);
+
                 ObjectNode vp = mapper.createObjectNode();
-                ArrayNode cwS = mapper.createArrayNode(); cwS.add(c1.path("x2").asDouble()).add(cwH1).add(-c1.path("z2").asDouble()); vp.set("cw_start", cwS);
-                ArrayNode swS = mapper.createArrayNode(); swS.add(c1.path("x2").asDouble()).add(cwH1+sH1).add(-c1.path("z2").asDouble()); vp.set("sw_start", swS);
-                ArrayNode cwE = mapper.createArrayNode(); cwE.add(c2.path("x2").asDouble()).add(cwH2).add(-c2.path("z2").asDouble()); vp.set("cw_end", cwE);
-                ArrayNode swE = mapper.createArrayNode(); swE.add(c2.path("x2").asDouble()).add(cwH2+sH2).add(-c2.path("z2").asDouble()); vp.set("sw_end", swE);
+                ArrayNode cwS = mapper.createArrayNode(); cwS.add(c1.path("x2").asDouble()).add(cwH1 + cwo1).add(-c1.path("z2").asDouble()); vp.set("cw_start", cwS);
+                ArrayNode swS = mapper.createArrayNode(); swS.add(c1.path("x2").asDouble()).add(cwH1 + cwo1 + sH1).add(-c1.path("z2").asDouble()); vp.set("sw_start", swS);
+                ArrayNode cwE = mapper.createArrayNode(); cwE.add(c2.path("x2").asDouble()).add(cwH2 + cwo2).add(-c2.path("z2").asDouble()); vp.set("cw_end", cwE);
+                ArrayNode swE = mapper.createArrayNode(); swE.add(c2.path("x2").asDouble()).add(cwH2 + cwo2 + sH2).add(-c2.path("z2").asDouble()); vp.set("sw_end", swE);
                 vp.put("qty_droppers",      v.path("qtyDroppers").asInt(0));
                 vp.put("initial_separation",v.path("initialSeparation").asDouble(5000));
                 vp.put("step_size",         500);

@@ -59,6 +59,8 @@ export class ViewerEngine {
   private dataGroup: THREE.Group;
   private vaneDataGroup: THREE.Group;
   private vaneGroups: Map<string, THREE.Group> = new Map();
+  private vaneResults: Map<string, any[]> = new Map();
+  private editingVaneKey: string | null = null;
 
   // Dynamic UI geometry
   private dynamicGroup: THREE.Group;
@@ -666,7 +668,7 @@ export class ViewerEngine {
       const w = this.toWorld(e);  // w.x = world X, w.y = world Z
 
       if (this.drawMode === 'none' && !this.isSelecting) {
-        const threshold = 40 / this.cam2D.zoom;
+        const threshold = 60 / this.cam2D.zoom;
         let closestType: 'track' | 'pole' | 'cantilever' | 'vane' | null = null;
         let closestIdx = -1;
         let minDist = threshold;
@@ -1798,6 +1800,22 @@ export class ViewerEngine {
         }
       });
     }
+
+    // Dropper results (CW Height) - ONLY in 3D and only for the vane being edited
+    if (this.viewMode === '3D' && this.editingVaneKey !== null) {
+      const group = this.vaneGroups.get(this.editingVaneKey);
+      if (group) {
+        group.children.forEach((child) => {
+          if (child instanceof THREE.Line && child.userData.result) {
+            const res = child.userData.result;
+            const pos = child.geometry.attributes.position.array;
+            // pos is [x1, y1, z1, x2, y2, z2] in Scene coordinates (Z = -z_editor)
+            let v = new THREE.Vector3(pos[0], pos[1], pos[2]);
+            addLbl(`CW: ${res.distance_cw_h.toFixed(3)}m`, v);
+          }
+        });
+      }
+    }
   }
 
   // ─── Camera fit ───────────────────────────────────────────────────────────────
@@ -1975,7 +1993,7 @@ export class ViewerEngine {
   }
 
 
-  public loadVaneLines(lines: ApiLine[], vaneKey: string): void {
+  public loadVaneLines(lines: ApiLine[], vaneKey: string, results?: any[]): void {
     // Remove existing group for this vane key
     const existing = this.vaneGroups.get(vaneKey);
     if (existing) {
@@ -1991,6 +2009,12 @@ export class ViewerEngine {
       this.vaneDataGroup.remove(existing);
     }
 
+    if (results) {
+      this.vaneResults.set(vaneKey, results);
+    } else {
+      this.vaneResults.delete(vaneKey);
+    }
+
     const group = new THREE.Group();
     group.name = `vane_${vaneKey}`;
     lines.forEach((apiLine) => {
@@ -2003,10 +2027,24 @@ export class ViewerEngine {
       const line = new THREE.Line(geo, mat);
       line.name = apiLine.name;
       line.layers.set(2);
+
+      // Add result label metadata if it's a dropper
+      if (apiLine.name.startsWith('Dropper_') && results) {
+        const idx = parseInt(apiLine.name.split('_')[1]);
+        const res = results.find(r => r.index === idx);
+        if (res) {
+          line.userData.result = res;
+        }
+      }
+
       group.add(line);
     });
     this.vaneGroups.set(vaneKey, group);
     this.vaneDataGroup.add(group);
+  }
+
+  public setEditingVane(vaneKey: string | null): void {
+    this.editingVaneKey = vaneKey;
   }
 
   public clearAllVaneLines(): void {

@@ -343,7 +343,8 @@ std::vector<viewer::Line3D> VaneBuilder::getAssemblyLines() const {
         math::Vec3 point2 = diffElementsPositions[idx];
         point2.y = point2.y + diffHeights[idx];
         
-        lines.push_back(viewer::Line3D("Dropper", point1, point2, 147, 51, 234, 255));
+        std::string name = "Dropper_" + std::to_string(i);
+        lines.push_back(viewer::Line3D(name, point1, point2, 147, 51, 234, 255));
     }
     
     return lines;

@@ -25,4 +25,5 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.addEndpoint("/ws-raw")
                 .setAllowedOriginPatterns("*");
     }
+
 }

@@ -171,6 +171,9 @@ public class LocationController {
                         vp.put("sw_weight",          v.path("swWeight").asDouble(0.0024));
                         vp.put("sw_tension",         v.path("swTension").asDouble(2000));
                         vp.put("dropper_weight",     v.path("dropperWeight").asDouble(0.0006));
+                        if (v.has("liftingStartDistance") && !v.path("liftingStartDistance").isNull()) {
+                            vp.put("lifting_start_distance", v.path("liftingStartDistance").asDouble());
+                        }
                         final int fvi = vi;
                         vaneMonos.add(calculatorClient.calculateVane(vp)
                             .map(vr -> { com.fasterxml.jackson.databind.node.ObjectNode e = mapper.createObjectNode(); e.put("_vaneIdx", fvi); e.put("status","success"); e.set("vane", vr.get("vane")); return (com.fasterxml.jackson.databind.JsonNode)e; })

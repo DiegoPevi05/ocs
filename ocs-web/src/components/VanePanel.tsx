@@ -58,6 +58,7 @@ interface Props {
 
 export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
     const [form, setForm] = useState<VaneData>({ ...vane });
+    const [minimized, setMinimized] = useState(false);
 
     const set = <K extends keyof VaneData>(key: K, val: VaneData[K]) =>
         setForm(f => ({ ...f, [key]: val }));
@@ -66,28 +67,46 @@ export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
         <>
             {/* ── Panel ── */}
             <div style={{
-                position: 'fixed', top: 0, right: 0, bottom: 0,
+                position: 'fixed', top: 0, right: 0, bottom: minimized ? 'auto' : 0,
                 width: 'clamp(280px, 25vw, 420px)',
                 background: '#111827',
                 borderLeft: '1px solid #1e2d45',
+                borderBottom: minimized ? '1px solid #1e2d45' : 'none',
                 zIndex: 201,
                 display: 'flex', flexDirection: 'column',
                 animation: 'cantileverPanelIn 0.22s ease-out',
                 boxShadow: '-8px 0 32px rgba(0,0,0,0.5)',
+                transition: 'bottom 0.2s ease-in-out',
             }}>
 
                 {/* ── Header ── */}
                 <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '14px 18px',
-                    borderBottom: '1px solid #1e2d45',
+                    borderBottom: minimized ? 'none' : '1px solid #1e2d45',
                     background: '#1c2539',
                     flexShrink: 0,
                 }}>
-                    <div>
-                        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vane</div>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', marginTop: 2 }}>
-                            {form.label || <span style={{ color: '#475569', fontStyle: 'italic' }}>unnamed</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button
+                            onClick={() => setMinimized(!minimized)}
+                            style={{
+                                background: 'none', border: 'none', color: '#64748b',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center',
+                                transition: 'transform 0.2s',
+                                transform: minimized ? 'rotate(-90deg)' : 'rotate(0deg)',
+                            }}
+                            title={minimized ? "Expand" : "Minimize"}
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <div>
+                            <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vane</div>
+                            <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', marginTop: 2 }}>
+                                {form.label || <span style={{ color: '#475569', fontStyle: 'italic' }}>unnamed</span>}
+                            </div>
                         </div>
                     </div>
                     <button
@@ -97,7 +116,8 @@ export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
                 </div>
 
                 {/* ── Scrollable body ── */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {!minimized && (
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
                     {/* Label */}
                     <Field label="Label">
@@ -151,16 +171,26 @@ export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
                             onChange={e => set('dropperWeight', +e.target.value)} style={INPUT} />
                     </Field>
 
+                    <Divider label="Lifting Configuration" />
+
+                    <Field label="Lifting Start Distance (mm)" hint="Distance from start where lifting begins. 0 = from start, length/2 = middle.">
+                        <input type="number" min={0} value={form.liftingStartDistance ?? ''}
+                            placeholder="Defaults to middle of vane"
+                            onChange={e => set('liftingStartDistance', e.target.value === '' ? undefined : +e.target.value)} style={INPUT} />
+                    </Field>
+
                 </div>
+                )}
 
                 {/* ── Footer ── */}
-                <div style={{
-                    padding: '12px 18px',
-                    borderTop: '1px solid #1e2d45',
-                    display: 'flex', gap: 8, justifyContent: 'flex-end',
-                    background: '#1c2539',
-                    flexShrink: 0,
-                }}>
+                {!minimized && (
+                    <div style={{
+                        padding: '12px 18px',
+                        borderTop: '1px solid #1e2d45',
+                        display: 'flex', gap: 8, justifyContent: 'flex-end',
+                        background: '#1c2539',
+                        flexShrink: 0,
+                    }}>
                     <button
                         onClick={onClose}
                         style={{
@@ -190,6 +220,7 @@ export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
                         }}
                     >Save</button>
                 </div>
+                )}
             </div>
 
             {/* Reuse the same keyframe from CantileverPanel */}

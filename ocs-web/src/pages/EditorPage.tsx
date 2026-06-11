@@ -195,7 +195,7 @@ export default function EditorPage() {
 
   // Results overlay
   const [lastCantResults, setLastCantResults] = useState<{ name: string; length: number; cut_length: number; diameter: number; thickness: number }[] | null>(null);
-  const [lastVaneResults, setLastVaneResults] = useState<{ index: number; dropper_length: number; distance_eye_to_eye: number; distance_cw: number; distance_pole_dropper: number; distance_dropper_dropper: number; dropper_inclination: number }[] | null>(null);
+  const [lastVaneResults, setLastVaneResults] = useState<{ index: number; dropper_length: number; distance_eye_to_eye: number; distance_cw: number; distance_pole_dropper: number; distance_dropper_dropper: number; distance_cw_h: number; dropper_inclination: number }[] | null>(null);
   const editCantileverIdxRef = useRef<number | null>(null);
   const editVaneIdxRef = useRef<number | null>(null);
 
@@ -532,6 +532,7 @@ export default function EditorPage() {
         sw_weight: v.swWeight ?? 0.0024,
         sw_tension: v.swTension ?? 2000,
         dropper_weight: v.dropperWeight ?? 0.0006,
+        lifting_start_distance: v.liftingStartDistance ?? -1.0,
       };
       stompRef.current?.publish({ destination: '/app/calculate/vane', body: JSON.stringify(payload) });
     });
@@ -554,8 +555,7 @@ export default function EditorPage() {
     if (!locationId || !location) return;
 
     const trackData: TrackData[] = tracks.map(tr => ({
-      label: tr[0]?.label ?? '',
-      points: tr.map(({ label: _l, ...rest }) => rest),
+      label: tr[0]?.label ?? '', points: tr.map(({ label: _l, ...rest }) => rest),
     }));
 
     const scene: SceneData = { tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList, anchorPoints: apList, anchors: aList };
@@ -1317,8 +1317,9 @@ export default function EditorPage() {
                       <tbody>
                         {lastVaneResults.map((r, i) => (
                           <tr key={i}>
-                            <td style={{ color: '#9333ea' }}>{r.index ?? i + 1}</td>
+                            <td style={{ color: '#9333ea' }}>{(r.index ?? i) + 1}</td>
                             <td>{r.dropper_length.toFixed(3)}</td>
+
                             <td>{r.distance_eye_to_eye.toFixed(3)}</td>
                             <td>{r.distance_cw.toFixed(3)}</td>
                             <td>{r.distance_pole_dropper.toFixed(2)}</td>

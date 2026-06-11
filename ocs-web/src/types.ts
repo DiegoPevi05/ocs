@@ -104,6 +104,7 @@ export interface VaneData {
   swWeight?: number;      // kg/m, default 0.0024
   swTension?: number;     // N, default 2000
   dropperWeight?: number; // default 0.0006
+  liftingStartDistance?: number; // mm from start where lifting starts, default length/2
 }
 
 // Vane calculation response from ocs-calculator
@@ -113,6 +114,7 @@ export interface ApiVaneResponse {
   _vaneIdx?: number;
   vane?: {
     lines: ApiLine[];
+    liftingStartDistance?: number;
     results: {
       index: number;
       dropper_length: number;
@@ -222,6 +224,7 @@ export interface ProjectSettings {
     dropperWeight: number;
     initialSeparation: number;
     qtyDroppers: number;
+    liftingStartDistance?: number;
   };
   anchorPoint: {
     width: number;               // mm, default plate width
@@ -261,6 +264,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
     dropperWeight: 0.0006,
     initialSeparation: 5000,
     qtyDroppers: 0,
+    liftingStartDistance: undefined,
   },
   anchorPoint: {
     width: 400,

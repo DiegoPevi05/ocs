@@ -11,36 +11,43 @@ VaneBuilder::VaneBuilder(
     double sw_weight, double sw_tension,
     double initial_separation, int qty_droppers, double dropper_weight,
     bool arrow, double arrow_length, bool lifting,
-    double step_size
+    double step_size,
+    double lifting_start_distance
 ) : 
     cw_start(cw_start), sw_start(sw_start),
     cw_end(cw_end), sw_end(sw_end),
     cw_weight(cw_weight), cw_tension(cw_tension),
     sw_weight(sw_weight), sw_tension(sw_tension),
     initial_separation(initial_separation), qty_droppers(qty_droppers), dropper_weight(dropper_weight),
-    arrow(arrow), arrow_length(arrow_length), lifting(lifting), step_size(step_size)
+    arrow(arrow), arrow_length(arrow_length), lifting(lifting), 
+    lifting_start_distance(lifting_start_distance), step_size(step_size)
 {
     startPoint = cw_start;
     endPoint = cw_end;
     vane_length = getDistance3D(startPoint, endPoint);
 
+    double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
+
+    if (this->lifting_start_distance < 0) {
+        this->lifting_start_distance = totalDist2d / 2.0;
+    }
+    this->lifting_start_distance = std::max(0.0, std::min(this->lifting_start_distance, totalDist2d));
+
     if (qty_droppers == 0) {
-        if (vane_length <= 20000) this->qty_droppers = 4;
-        else if (vane_length < 30000) this->qty_droppers = 4;
-        else if (vane_length < 34000) this->qty_droppers = 6;
-        else if (vane_length < 38000) this->qty_droppers = 6;
-        else if (vane_length < 40000) this->qty_droppers = 7;
-        else if (vane_length < 60000) this->qty_droppers = 7;
+        if (totalDist2d <= 20000) this->qty_droppers = 4;
+        else if (totalDist2d < 30000) this->qty_droppers = 4;
+        else if (totalDist2d < 34000) this->qty_droppers = 6;
+        else if (totalDist2d < 38000) this->qty_droppers = 6;
+        else if (totalDist2d < 40000) this->qty_droppers = 7;
+        else if (totalDist2d < 60000) this->qty_droppers = 7;
         else this->qty_droppers = 11;
     }
 
     if (this->qty_droppers > 1) {
-        dropper_separation = (vane_length - 2.0 * this->initial_separation) / (this->qty_droppers - 1);
+        dropper_separation = (totalDist2d - 2.0 * this->initial_separation) / (this->qty_droppers - 1);
     } else {
         dropper_separation = 0;
     }
-
-    h = getSystemHeightA() - getSystemHeightB();
 
     reaction_ax = 0;
     reaction_ay = 0;
@@ -68,42 +75,61 @@ math::Vec3 VaneBuilder::getPointAlongVector(const math::Vec3& start, const math:
 }
 
 void VaneBuilder::generateDiffElements() {
-    // 1. Collect all dropper distances (exact positions, never moved)
-    std::vector<double> distances;
-    distances.push_back(0.0); // pole A
-    for (int i = 0; i < qty_droppers; i++) {
-        distances.push_back(initial_separation + i * dropper_separation);
-    }
-    distances.push_back(vane_length); // pole B
+    double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
 
-    // 2. If step_size requested, merge a dense rendering grid in between
+    // 1. Collect all dropper distances (horizontal positions)
+    std::vector<double> distances2d;
+    distances2d.push_back(0.0); // pole A
+    for (int i = 0; i < qty_droppers; i++) {
+        distances2d.push_back(initial_separation + i * dropper_separation);
+    }
+    distances2d.push_back(totalDist2d); // pole B
+
+    // 2. If step_size requested, merge a dense rendering grid
     if (step_size > 0.0) {
         double d = step_size;
-        while (d < vane_length) {
-            distances.push_back(d);
+        while (d < totalDist2d) {
+            distances2d.push_back(d);
             d += step_size;
         }
-        // Remove duplicates, sort
-        std::sort(distances.begin(), distances.end());
-        distances.erase(
-            std::unique(distances.begin(), distances.end(),
+        std::sort(distances2d.begin(), distances2d.end());
+        distances2d.erase(
+            std::unique(distances2d.begin(), distances2d.end(),
                 [](double a, double b){ return std::abs(a - b) < 0.1; }),
-            distances.end()
+            distances2d.end()
         );
     }
 
     // 3. Build position array
     diffElementsPositions.clear();
     dropper_indexes.clear();
-    for (double dist : distances) {
-        diffElementsPositions.push_back(getPointAlongVector(startPoint, endPoint, dist));
+    for (double d2d : distances2d) {
+        double ratio = (totalDist2d > 0) ? d2d / totalDist2d : 0.0;
+        math::Vec3 p;
+        p.x = startPoint.x + (endPoint.x - startPoint.x) * ratio;
+        p.z = startPoint.z + (endPoint.z - startPoint.z) * ratio;
+        
+        // Apply lifting start distance to Y coordinate
+        if (totalDist2d > 0) {
+            if (d2d < lifting_start_distance) {
+                p.y = startPoint.y;
+            } else {
+                double denom = totalDist2d - lifting_start_distance;
+                double t = (denom > 0) ? (d2d - lifting_start_distance) / denom : 1.0;
+                p.y = startPoint.y * (1.0 - t) + endPoint.y * t;
+            }
+        } else {
+            p.y = startPoint.y;
+        }
+        
+        diffElementsPositions.push_back(p);
     }
 
-    // 4. Find dropper indexes (exact match against known distances)
+    // 4. Find dropper indexes
     for (int i = 0; i < qty_droppers; i++) {
         double target = initial_separation + i * dropper_separation;
-        for (size_t j = 0; j < distances.size(); j++) {
-            if (std::abs(distances[j] - target) < 0.1) {
+        for (size_t j = 0; j < distances2d.size(); j++) {
+            if (std::abs(distances2d[j] - target) < 0.1) {
                 dropper_indexes.push_back(j);
                 break;
             }
@@ -123,9 +149,9 @@ void VaneBuilder::generateLifting() {
 
 double VaneBuilder::getRelDiffMoments(size_t n) const {
     double sum = 0;
-    double rel_len = getDistance3D(startPoint, diffElementsPositions[n]);
+    double rel_len = std::sqrt(std::pow(diffElementsPositions[n].x - startPoint.x, 2) + std::pow(diffElementsPositions[n].z - startPoint.z, 2));
     for (size_t x = 1; x < n; x++) {
-        double el_len = getDistance3D(startPoint, diffElementsPositions[x]);
+        double el_len = std::sqrt(std::pow(diffElementsPositions[x].x - startPoint.x, 2) + std::pow(diffElementsPositions[x].z - startPoint.z, 2));
         sum += diffElementsWeights[x] * (rel_len - el_len);
     }
     return sum;
@@ -133,10 +159,11 @@ double VaneBuilder::getRelDiffMoments(size_t n) const {
 
 double VaneBuilder::getAbsDiffMoments() const {
     double sum = 0;
+    double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
     if (diffElementsPositions.size() <= 2) return 0;
     for (size_t x = 1; x <= diffElementsPositions.size() - 2; x++) {
-        double el_len = getDistance3D(startPoint, diffElementsPositions[x]);
-        sum += diffElementsWeights[x] * (vane_length - el_len);
+        double el_len = std::sqrt(std::pow(diffElementsPositions[x].x - startPoint.x, 2) + std::pow(diffElementsPositions[x].z - startPoint.z, 2));
+        sum += diffElementsWeights[x] * (totalDist2d - el_len);
     }
     return sum;
 }
@@ -163,10 +190,11 @@ void VaneBuilder::generateDiffWeights() {
 }
 
 void VaneBuilder::generateReactions() {
-    double L = vane_length;
+    double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
+    double L = totalDist2d;
     double p = sw_weight;
     double MB = getAbsDiffMoments() + (p * L * L / 2.0);
-    double h_val = h;
+    double h_val = sw_start.y - sw_end.y; // Actual elevation difference of messenger wire
     double Ta = sw_tension;
 
     double numerator = MB * h_val + std::sqrt(std::max(0.0, (Ta * Ta * L * L * (L * L + h_val * h_val)) - MB * MB * L * L));
@@ -238,11 +266,13 @@ void VaneBuilder::generateHeights() {
             //                          equilibrium about B, independent of geometry).
             //
             // MB = reaction_by·L + h·reaction_ax  (from generateReactions), so:
-            //   R_A_beam = reaction_by + h·H/L
+            //   R_A_beam = reaction_by + h_messenger·H/L
             //
             // This guarantees M_beam(0)=0 and M_beam(L)=0, giving exactly heightA
             // at x=0 and heightB at x=L with a smooth parabola in between.
-            double R_A_beam = reaction_by + (vane_length > 0.0 ? h * reaction_ax / vane_length : 0.0);
+            double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
+            double h_messenger = sw_start.y - sw_end.y;
+            double R_A_beam = reaction_by + (totalDist2d > 0.0 ? h_messenger * reaction_ax / totalDist2d : 0.0);
             double support_wire_arrow = 0;
             if (reaction_ax != 0) {
                 support_wire_arrow = (R_A_beam * elem_len
@@ -252,8 +282,17 @@ void VaneBuilder::generateHeights() {
             }
 
             // Linearly interpolated chord: correct for asymmetric spans (heightA ≠ heightB).
-            double t = (vane_length > 0) ? elem_len / vane_length : 0.0;
-            double baseline = getSystemHeightA() * (1.0 - t) + getSystemHeightB() * t;
+            double baseline;
+            double dist2d = std::sqrt(std::pow(diffElementsPositions[x].x - startPoint.x, 2) + std::pow(diffElementsPositions[x].z - startPoint.z, 2));
+            double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
+
+            if (totalDist2d > 0 && dist2d > lifting_start_distance) {
+                double denom = totalDist2d - lifting_start_distance;
+                double t = (denom > 0) ? (dist2d - lifting_start_distance) / denom : 1.0;
+                baseline = getSystemHeightA() * (1.0 - t) + getSystemHeightB() * t;
+            } else {
+                baseline = getSystemHeightA();
+            }
             diffHeights[x] = baseline - support_wire_arrow;
 
             auto it = std::find(dropper_indexes.begin(), dropper_indexes.end(), x);

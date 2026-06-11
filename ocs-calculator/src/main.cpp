@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
                 0.01373, 10000.0,
                 5000.0, 0, 0.005,
                 true, 50.0, false,
-                1000.0
+                1000.0, -1.0
             );
 
             vane.build();

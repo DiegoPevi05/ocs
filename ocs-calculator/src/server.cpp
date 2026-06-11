@@ -234,13 +234,14 @@ json buildVaneLogic(const json& j, double& calcTimeMs) {
     bool arrow = j.value("arrow", false);
     double arrow_length = j.value("arrow_length", 0.0);
     bool lifting = j.value("lifting", false);
+    double lifting_start_distance = j.value("lifting_start_distance", -1.0);
     double step_size = j.value("step_size", 0.0);
 
     VaneBuilder builder(
         cw_start, sw_start, cw_end, sw_end,
         cw_weight, cw_tension, sw_weight, sw_tension,
         initial_separation, qty_droppers, dropper_weight,
-        arrow, arrow_length, lifting, step_size
+        arrow, arrow_length, lifting, step_size, lifting_start_distance
     );
     
     auto t1 = std::chrono::high_resolution_clock::now();

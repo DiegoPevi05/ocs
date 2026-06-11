@@ -35,6 +35,7 @@ private:
     bool arrow;
     double arrow_length;
     bool lifting;
+    double lifting_start_distance;
     double step_size; // mm between sample points for 3D rendering (0 = dropper-only points)
 
     // Computed properties
@@ -46,7 +47,6 @@ private:
     double reaction_by;
     math::Vec3 startPoint;
     math::Vec3 endPoint;
-    double h;
 
     std::vector<math::Vec3> diffElementsPositions;
     std::vector<double> diffElementsWeights;
@@ -80,7 +80,8 @@ public:
         double sw_weight, double sw_tension,
         double initial_separation, int qty_droppers, double dropper_weight,
         bool arrow, double arrow_length, bool lifting,
-        double step_size = 0.0
+        double step_size = 0.0,
+        double lifting_start_distance = -1.0
     );
 
     void build();

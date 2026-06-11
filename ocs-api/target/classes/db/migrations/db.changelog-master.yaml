@@ -15,3 +15,5 @@ databaseChangeLog:
       file: db/migrations/v0007_pole_dimensions.sql
   - include:
       file: db/migrations/v0008_project_settings.sql
+  - include:
+      file: db/migrations/v0009_vane_lifting_start_distance.sql

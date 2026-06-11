@@ -42,6 +42,7 @@ public class Vane extends BaseEntity {
     private Integer qtyDroppers;
     private Double dropperWeight;
     private Double stepSize;
+    private Double liftingStartDistance;
 
     @Column(columnDefinition = "jsonb")
     private String calcResultJson;

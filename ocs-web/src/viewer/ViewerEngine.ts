@@ -1811,7 +1811,7 @@ export class ViewerEngine {
             const pos = child.geometry.attributes.position.array;
             // pos is [x1, y1, z1, x2, y2, z2] in Scene coordinates (Z = -z_editor)
             let v = new THREE.Vector3(pos[0], pos[1], pos[2]);
-            addLbl(`CW: ${res.distance_cw_h.toFixed(3)}m`, v);
+            addLbl(`#${res.index + 1} CW: ${res.distance_cw_h.toFixed(3)}m`, v);
           }
         });
       }

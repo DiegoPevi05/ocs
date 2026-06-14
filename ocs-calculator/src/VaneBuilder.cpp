@@ -284,7 +284,6 @@ void VaneBuilder::generateHeights() {
             // Linearly interpolated chord: correct for asymmetric spans (heightA ≠ heightB).
             double baseline;
             double dist2d = std::sqrt(std::pow(diffElementsPositions[x].x - startPoint.x, 2) + std::pow(diffElementsPositions[x].z - startPoint.z, 2));
-            double totalDist2d = std::sqrt(std::pow(endPoint.x - startPoint.x, 2) + std::pow(endPoint.z - startPoint.z, 2));
 
             if (totalDist2d > 0 && dist2d > lifting_start_distance) {
                 double denom = totalDist2d - lifting_start_distance;

@@ -33,8 +33,12 @@ int main() {
         { 150.0, 50.0, 100.0 }, { 50.0 }
     };
     auto steadyArmParams = assemblies::SteadyArmParams{
-        -5.0, 1200.0, 100.0, std::nullopt, std::nullopt,
-        { 33.7, 2.5 }, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        -5.0, 1200.0, 100.0, 
+        250.0, // eye_clamp_distance
+        components::StainlessSteelWireRope{6.0}, // stainless_steel_wire_rope
+        { 33.7, 2.5 }, 
+        std::nullopt, std::nullopt, std::nullopt, 
+        components::EyeClamp{35.0}, // eye_clamp
         components::ClampHolderContactWire{50, 40, 30, 0}
     };
 

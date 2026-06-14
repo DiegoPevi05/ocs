@@ -170,15 +170,16 @@ int main(int argc, char** argv) {
                 { 150.0, 50.0, 100.0 }, { 50.0 }
             };
             auto steadyArmParams = assemblies::SteadyArmParams{
-                -2.0, 1200.0, 100.0, std::nullopt, std::nullopt,
-                { 33.7, 2.5 }, 
+                -2.0, 1200.0, 100.0, 
+                250.0, // eye_clamp_distance
+                components::StainlessSteelWireRope{6.0}, // stainless_steel_wire_rope
+                { 33.7, 2.5 },
                 components::HookEndFitting{100.0, 20.0},
                 components::HookEndClamp{50.0, 40.0, 10.0, 10.0},
                 components::SwivelClip{40.0, 30.0, 15.0},
-                std::nullopt,
+                components::EyeClamp{35.0}, // eye_clamp
                 components::ClampHolderContactWire{50, 40, 30, 0}
             };
-            
             // Register Arm setup
             assemblies::RegisterArmParams regParams;
             regParams.alpha = isLeft ? 2 : -7.98;

@@ -13,7 +13,7 @@ import { VanePanel } from '../components/VanePanel';
 import { PolePanel } from '../components/PolePanel';
 import { AnchorPointPanel } from '../components/AnchorPointPanel';
 import { AnchorPanel } from '../components/AnchorPanel';
-import type { DrawMode, ViewMode, SceneData, Location, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
+import type { DrawMode, ViewMode, SceneData, Location, TrackData, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
 import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -192,6 +192,8 @@ export default function EditorPage() {
   const [vaneFormLabel, setVaneFormLabel] = useState('');
   const [vaneFormDroppers, setVaneFormDroppers] = useState(0);
   const [vaneFormInitialSep, setVaneFormInitialSep] = useState(5000);
+  const [vaneFormPoleCwHeight, setVaneFormPoleCwHeight] = useState(5400);
+  const [vaneFormPoleSysHeight, setVaneFormPoleSysHeight] = useState(1000);
 
   // Results overlay
   const [lastCantResults, setLastCantResults] = useState<{ name: string; length: number; cut_length: number; diameter: number; thickness: number }[] | null>(null);
@@ -509,21 +511,25 @@ export default function EditorPage() {
     if (!stompRef.current?.connected) return;
     vaneList.forEach((v, vIdx) => {
       const c1 = cantList[v.cantileverIdx1];
-      const c2 = cantList[v.cantileverIdx2];
-      if (!c1 || !c2) return;
+      if (!c1) return;
+      const c2 = v.cantileverIdx2 !== undefined ? cantList[v.cantileverIdx2] : null;
+      if (!c2 && v.poleIdx === undefined) return;
+
       const cwH1 = c1.contactWireHeight ?? 5400;
       const sysH1 = c1.systemHeight ?? 1000;
       const cwo1 = c1.contactWireVerticalOffset ?? 120;
-      const cwH2 = c2.contactWireHeight ?? 5400;
-      const sysH2 = c2.systemHeight ?? 1000;
-      const cwo2 = c2.contactWireVerticalOffset ?? 120;
+      
+      const cwH2 = c2 ? (c2.contactWireHeight ?? 5400) : (v.poleContactWireHeight ?? 5400);
+      const sysH2 = c2 ? (c2.systemHeight ?? 1000) : (v.poleSystemHeight ?? 1000);
+      const cwo2 = c2 ? (c2.contactWireVerticalOffset ?? 120) : 0; // offset is usually 0 if attached directly to pole face
+
       // cwAxis.y = contactWireHeight + contactWireVerticalOffset (invert(viaDir) = up)
       const payload = {
         _vaneIdx: startIndex + vIdx,
         cw_start: [c1.x2, cwH1 + cwo1, -c1.z2],
         sw_start: [c1.x2, cwH1 + cwo1 + sysH1, -c1.z2],
-        cw_end: [c2.x2, cwH2 + cwo2, -c2.z2],
-        sw_end: [c2.x2, cwH2 + cwo2 + sysH2, -c2.z2],
+        cw_end: [v.x2, cwH2 + cwo2, -v.z2],
+        sw_end: [v.x2, cwH2 + cwo2 + sysH2, -v.z2],
         qty_droppers: v.qtyDroppers ?? 0,
         initial_separation: v.initialSeparation ?? 5000,
         step_size: 500,  // fixed 500mm rendering grid for smooth wire curves
@@ -610,44 +616,77 @@ export default function EditorPage() {
 
       } else if (mode === 'vane') {
         const firstIdx = vaneFirstCantIdxRef.current;
-        const clickedIdx: number = cantileverIdx ?? -1;
-        if (clickedIdx < 0) return; // must click on a cantilever endpoint
+        const clickedCantIdx: number = cantileverIdx ?? -1;
+        const clickedPoleIdx: number = poleIdx ?? -1;
+
+        if (clickedCantIdx < 0 && clickedPoleIdx < 0) return;
+
         const cantList = cantileversRef.current;
 
         if (firstIdx === null) {
-          // First click: record first cantilever
-          setVaneFirstCantIdx(clickedIdx);
+          // First click: must be a cantilever
+          if (clickedCantIdx < 0) return;
+          setVaneFirstCantIdx(clickedCantIdx);
         } else {
-          // Second click: must be a different cantilever
-          if (clickedIdx === firstIdx) return;
+          // Second click
+          if (clickedCantIdx === firstIdx) return;
 
-          // Check max-2 vanes per cantilever constraint
+          // Check constraints
           const currentVanes = vanesRef.current;
           const c1Vanes = currentVanes.filter(v => v.cantileverIdx1 === firstIdx || v.cantileverIdx2 === firstIdx).length;
-          const c2Vanes = currentVanes.filter(v => v.cantileverIdx1 === clickedIdx || v.cantileverIdx2 === clickedIdx).length;
           if (c1Vanes >= 2) { alert('Cantilever 1 already has 2 vanes'); return; }
-          if (c2Vanes >= 2) { alert('Cantilever 2 already has 2 vanes'); return; }
-
-          // Check not already connected
-          const alreadyLinked = currentVanes.some(v =>
-            (v.cantileverIdx1 === firstIdx && v.cantileverIdx2 === clickedIdx) ||
-            (v.cantileverIdx1 === clickedIdx && v.cantileverIdx2 === firstIdx)
-          );
-          if (alreadyLinked) { alert('These cantilevers are already linked by a vane'); return; }
+          
+          if (clickedCantIdx >= 0) {
+            const c2Vanes = currentVanes.filter(v => v.cantileverIdx1 === clickedCantIdx || v.cantileverIdx2 === clickedCantIdx).length;
+            if (c2Vanes >= 2) { alert('Cantilever 2 already has 2 vanes'); return; }
+            const alreadyLinked = currentVanes.some(v =>
+              (v.cantileverIdx1 === firstIdx && v.cantileverIdx2 === clickedCantIdx) ||
+              (v.cantileverIdx1 === clickedCantIdx && v.cantileverIdx2 === firstIdx)
+            );
+            if (alreadyLinked) { alert('These cantilevers are already linked by a vane'); return; }
+          } else if (clickedPoleIdx >= 0) {
+            const alreadyLinked = currentVanes.some(v =>
+              (v.cantileverIdx1 === firstIdx && v.poleIdx === clickedPoleIdx)
+            );
+            if (alreadyLinked) { alert('This cantilever is already linked to this pole by a vane'); return; }
+          }
 
           const c1 = cantList[firstIdx];
-          const c2 = cantList[clickedIdx];
-          if (!c1 || !c2) return;
+          if (!c1) return;
 
-          setVaneModal({ x1: c1.x2, z1: c1.z2, x2: c2.x2, z2: c2.z2 });
+          let x2 = 0, z2 = 0;
+          if (clickedCantIdx >= 0) {
+            const c2 = cantList[clickedCantIdx];
+            if (!c2) return;
+            x2 = c2.x2; z2 = c2.z2;
+            (pendingVaneCantRef as any).current = { cantileverIdx1: firstIdx, cantileverIdx2: clickedCantIdx };
+          } else if (clickedPoleIdx >= 0) {
+            const p = polesRef.current[clickedPoleIdx];
+            if (!p) return;
+            // Calculate attachment on pole face perpendicular to track
+            const foot = closestPointOnTracks(completedTracksRef.current, p.x, p.z || 0);
+            
+            // Use the track's tangent direction (tx, tz) to offset along the track.
+            // Point the offset towards the first cantilever (c1).
+            const vToC1x = c1.x2 - p.x;
+            const vToC1z = c1.z2 - (p.z || 0);
+            const dot = vToC1x * foot.tx + vToC1z * foot.tz;
+            const sign = dot >= 0 ? 1 : -1;
+            
+            const offset = (p.width || 300) / 2;
+            x2 = p.x + sign * foot.tx * offset;
+            z2 = (p.z || 0) + sign * foot.tz * offset;
+            (pendingVaneCantRef as any).current = { cantileverIdx1: firstIdx, poleIdx: clickedPoleIdx };
+          }
+
+          setVaneModal({ x1: c1.x2, z1: c1.z2, x2, z2 });
           setVaneFirstCantIdx(null);
           setVaneFormLabel('');
           setVaneFormDroppers(projectSettings.vane.qtyDroppers);
           setVaneFormInitialSep(projectSettings.vane.initialSeparation);
-          // Store pending cantilever indices via a ref for use in saveVane
-          (pendingVaneCantRef as any).current = { cantileverIdx1: firstIdx, cantileverIdx2: clickedIdx };
+          setVaneFormPoleCwHeight(projectSettings.cantilever.contactWireHeight ?? 5400);
+          setVaneFormPoleSysHeight(projectSettings.cantilever.systemHeight ?? 1000);
         }
-
       } else if (mode === 'anchorPoint') {
         // Show configure panel; compute D (distance to nearest pole center)
         const nearestPole = polesRef.current.reduce<{ d: number; pole: PoleData | null }>((acc, p) => {
@@ -825,7 +864,26 @@ export default function EditorPage() {
         const selA = selectedAnchorsRef.current;
         if (selT.length || selP.length || selC.length || selV.length || selAP.length || selA.length) {
           setCompletedTracks(prev => prev.filter((_, i) => !selT.includes(i)));
-          setPoles(prev => prev.filter((_, i) => !selP.includes(i)));
+          
+          let newVanes = vanesRef.current;
+          if (selV.length) {
+            newVanes = newVanes.filter((_, i) => !selV.includes(i));
+          }
+
+          if (selP.length) {
+            const oldPoles = polesRef.current;
+            const newPoles = oldPoles.filter((_, i) => !selP.includes(i));
+            const poleIdxMap = new Array(oldPoles.length).fill(-1);
+            let np = 0;
+            oldPoles.forEach((_, oi) => { if (!selP.includes(oi)) poleIdxMap[oi] = np++; });
+            setPoles(newPoles);
+            
+            // Filter vanes attached to deleted poles
+            newVanes = newVanes
+              .filter(v => v.poleIdx === undefined || poleIdxMap[v.poleIdx] !== -1)
+              .map(v => v.poleIdx !== undefined ? { ...v, poleIdx: poleIdxMap[v.poleIdx] } : v);
+          }
+
           if (selC.length) {
             const oldCants = cantileversRef.current;
             const newCants = oldCants.filter((_, i) => !selC.includes(i));
@@ -833,13 +891,17 @@ export default function EditorPage() {
             let ni = 0;
             oldCants.forEach((_, oi) => { if (!selC.includes(oi)) idxMap[oi] = ni++; });
             setCantilevers(newCants);
-            setVanes(prev => prev
-              .filter(v => idxMap[v.cantileverIdx1] !== -1 && idxMap[v.cantileverIdx2] !== -1)
-              .map(v => ({ ...v, cantileverIdx1: idxMap[v.cantileverIdx1], cantileverIdx2: idxMap[v.cantileverIdx2] }))
-            );
-          } else {
-            setVanes(prev => prev.filter((_, i) => !selV.includes(i)));
+            
+            newVanes = newVanes
+              .filter(v => idxMap[v.cantileverIdx1] !== -1 && (v.cantileverIdx2 === undefined || idxMap[v.cantileverIdx2] !== -1))
+              .map(v => ({ 
+                ...v, 
+                cantileverIdx1: idxMap[v.cantileverIdx1], 
+                cantileverIdx2: v.cantileverIdx2 !== undefined ? idxMap[v.cantileverIdx2] : undefined 
+              }));
           }
+
+          setVanes(newVanes);
           if (selAP.length) {
             // Remove anchors that reference deleted anchor points, remap indices
             const oldAPs = anchorPointsRef.current;
@@ -915,12 +977,13 @@ export default function EditorPage() {
   const saveVane = () => {
     if (!vaneModal) return;
     if (!vaneFormLabel.trim()) { alert('Label is required'); return; }
-    const pending = pendingVaneCantRef.current;
+    const pending = pendingVaneCantRef.current as any;
     if (!pending) return;
     const s = projectSettings.vane;
     const newV: VaneData = {
       cantileverIdx1: pending.cantileverIdx1,
       cantileverIdx2: pending.cantileverIdx2,
+      poleIdx: pending.poleIdx,
       x1: vaneModal.x1, z1: vaneModal.z1,
       x2: vaneModal.x2, z2: vaneModal.z2,
       label: vaneFormLabel.trim(),
@@ -931,6 +994,8 @@ export default function EditorPage() {
       swWeight: s.swWeight,
       swTension: s.swTension,
       dropperWeight: s.dropperWeight,
+      poleContactWireHeight: pending.poleIdx !== undefined ? vaneFormPoleCwHeight : undefined,
+      poleSystemHeight: pending.poleIdx !== undefined ? vaneFormPoleSysHeight : undefined,
     };
     setVanes(prev => {
       const next = [...prev, newV];
@@ -1034,8 +1099,10 @@ export default function EditorPage() {
     engineRef.current?.setEditingVane(idx.toString());
     // Switch to 3D front-elevation view looking perpendicular to the vane
     const c1 = cantilevers[v.cantileverIdx1];
-    const c2 = cantilevers[v.cantileverIdx2];
-    const cwHeight = ((c1?.contactWireHeight ?? 5400) + (c2?.contactWireHeight ?? 5400)) / 2;
+    const c2 = v.cantileverIdx2 !== undefined ? cantilevers[v.cantileverIdx2] : null;
+    const h1 = c1?.contactWireHeight ?? 5400;
+    const h2 = c2 ? (c2.contactWireHeight ?? 5400) : (v.poleContactWireHeight ?? 5400);
+    const cwHeight = (h1 + h2) / 2;
     setViewMode('3D');
     setDrawMode('none');
     engineRef.current?.setDrawMode('none');
@@ -1415,6 +1482,20 @@ export default function EditorPage() {
                 <input type="number" min={0} value={vaneFormInitialSep} onChange={e => setVaneFormInitialSep(+e.target.value)} style={INP} />
               </div>
             </div>
+            
+            {(pendingVaneCantRef.current as any)?.poleIdx !== undefined && (
+              <div style={{ ...ROW, marginTop: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={LBL}>Pole CW Height (mm)</label>
+                  <input type="number" value={vaneFormPoleCwHeight} onChange={e => setVaneFormPoleCwHeight(+e.target.value)} style={INP} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={LBL}>Pole System Height (mm)</label>
+                  <input type="number" value={vaneFormPoleSysHeight} onChange={e => setVaneFormPoleSysHeight(+e.target.value)} style={INP} />
+                </div>
+              </div>
+            )}
+
             <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>
               Inter-dropper spacing = (vane length − 2 × initial separation) ÷ (droppers − 1), calculated automatically.
             </div>

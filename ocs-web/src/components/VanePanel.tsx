@@ -171,6 +171,22 @@ export function VanePanel({ vane, onSave, onCalculate, onClose }: Props) {
                             onChange={e => set('dropperWeight', +e.target.value)} style={INPUT} />
                     </Field>
 
+                    {form.poleIdx !== undefined && (
+                        <>
+                            <Divider label="Pole Attachment" />
+                            <Row>
+                                <Field label="Pole CW Height (mm)">
+                                    <input type="number" value={form.poleContactWireHeight ?? 5400}
+                                        onChange={e => set('poleContactWireHeight', +e.target.value)} style={INPUT} />
+                                </Field>
+                                <Field label="Pole System Height (mm)">
+                                    <input type="number" value={form.poleSystemHeight ?? 1000}
+                                        onChange={e => set('poleSystemHeight', +e.target.value)} style={INPUT} />
+                                </Field>
+                            </Row>
+                        </>
+                    )}
+
                     <Divider label="Lifting Configuration" />
 
                     <Field label="Lifting Start Distance (mm)" hint="Distance from start where lifting begins. 0 = from start, length/2 = middle.">

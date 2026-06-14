@@ -200,11 +200,19 @@ export function PolePanel({ pole, settings, onSave, onClose }: Props) {
             />
           </Field>
 
-          {/* Height */}
-          <Field label="Height (mm)">
-            <input type="number" value={form.h ?? s.pole.height}
-              onChange={e => set('h', +e.target.value)} style={INPUT} />
-          </Field>
+          <Row>
+            {/* Elevation */}
+            <Field label="Y Elevation (mm)" hint="Vertical offset from base track level.">
+              <input type="number" value={form.y ?? 0}
+                onChange={e => set('y', +e.target.value)} style={INPUT} />
+            </Field>
+
+            {/* Height */}
+            <Field label="Height (mm)">
+              <input type="number" value={form.h ?? s.pole.height}
+                onChange={e => set('h', +e.target.value)} style={INPUT} />
+            </Field>
+          </Row>
 
           <Divider label="Catenary Configuration" />
 

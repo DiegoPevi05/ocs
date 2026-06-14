@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.itextpdf.kernel.colors.DeviceRgb;
 import com.itextpdf.kernel.geom.PageSize;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfWriter;
@@ -13,7 +12,6 @@ import com.itextpdf.layout.borders.Border;
 import com.itextpdf.layout.borders.SolidBorder;
 import com.itextpdf.layout.element.AreaBreak;
 import com.itextpdf.layout.element.Cell;
-import com.itextpdf.layout.element.LineSeparator;
 import com.itextpdf.layout.element.Paragraph;
 import com.itextpdf.layout.element.Table;
 import com.itextpdf.layout.properties.*;
@@ -33,17 +31,6 @@ public class ReportService {
 
     private final CalculatorClient calculatorClient;
     private final ObjectMapper mapper;
-
-    // ── Palette ───────────────────────────────────────────────────────────────
-    private static final DeviceRgb C_NAVY     = new DeviceRgb(15,  23,  42);
-    private static final DeviceRgb C_BLUE     = new DeviceRgb(37,  99,  235);
-    private static final DeviceRgb C_HEADER   = new DeviceRgb(30,  41,  59);
-    private static final DeviceRgb C_ROW_ALT  = new DeviceRgb(248, 250, 252);
-    private static final DeviceRgb C_BORDER   = new DeviceRgb(203, 213, 225);
-    private static final DeviceRgb C_TH_BG    = new DeviceRgb(241, 245, 249);
-    private static final DeviceRgb C_MUTED    = new DeviceRgb(100, 116, 139);
-    private static final DeviceRgb C_PURPLE   = new DeviceRgb(147, 51,  234);
-    private static final DeviceRgb C_WHITE    = new DeviceRgb(255, 255, 255);
 
     public ReportService(CalculatorClient calculatorClient, ObjectMapper mapper) {
         this.calculatorClient = calculatorClient;
@@ -184,11 +171,7 @@ public class ReportService {
             JsonNode cantiNode = sceneData.path("cantilevers");
             JsonNode vanesNode = sceneData.path("vanes");
 
-            // ── Pre-build a map: cantilever output index → batchResult.poles[outputIdx]
-            // Each input[i] produces cantQtyPerInput[i] poles in the output.
-            // batchResultPoles[outputOffset + k] = catenary k of drawn cantilever i.
             JsonNode batchPoles = batchResult.path("poles");
-            // outputOffset[i] = start index in batchPoles for drawn cantilever i
             int[] outputOffset = new int[cantQtyPerInput.size()];
             int off = 0;
             for (int i = 0; i < cantQtyPerInput.size(); i++) {
@@ -201,7 +184,7 @@ public class ReportService {
 
             // ── Cantilever section title page ─────────────────────────────────
             addSectionTitlePage(doc, "CANTILEVER RESULTS",
-                    "Component dimensions for each pole and catenary wire", C_HEADER);
+                    "Component dimensions for each pole and catenary wire");
             doc.add(new AreaBreak(AreaBreakType.NEXT_PAGE));
 
             if (polesNode.isArray() && cantiNode.isArray()) {
@@ -211,7 +194,6 @@ public class ReportService {
                     String poleLabel = pole.path("label").asText(null);
                     String poleTitle = "Pole " + poleNumber + (poleLabel != null ? " — " + poleLabel : "");
 
-                    // Find drawn cantilevers at this pole
                     List<Integer> myCantiIdxs = new ArrayList<>();
                     int ci = 0;
                     for (JsonNode c : cantiNode) {
@@ -250,16 +232,15 @@ public class ReportService {
                     poleNumber++;
                 }
             } else {
-                doc.add(styledParagraph("No cantilever data available.", 9, C_MUTED).setMarginTop(8));
+                doc.add(new Paragraph("No cantilever data available.").setFontSize(9).setMarginTop(8));
             }
 
             // ── Vane section title page ───────────────────────────────────────
             doc.add(new AreaBreak(AreaBreakType.NEXT_PAGE));
             addSectionTitlePage(doc, "VANE RESULTS",
-                    "Dropper lengths and distances for each inter-pole vane", C_PURPLE);
+                    "Dropper lengths and distances for each inter-pole vane");
             doc.add(new AreaBreak(AreaBreakType.NEXT_PAGE));
 
-            // Sort vane results by _vi index for consistent ordering
             Map<Integer, JsonNode> vaneMap = new LinkedHashMap<>();
             for (JsonNode vr : vaneResults) {
                 int vIdx = vr.path("_vi").asInt(-1);
@@ -270,26 +251,20 @@ public class ReportService {
                 JsonNode[] cArr = new JsonNode[cantiNode.size()];
                 int ci2 = 0; for (JsonNode c : cantiNode) cArr[ci2++] = c;
 
-                for (int vi = 0; vi < vanesNode.size(); vi++) {
-                    JsonNode vNode = vanesNode.get(vi);
-                    String vaneLabel = vNode.path("label").asText(null);
-                    int c1i = vNode.path("cantileverIdx1").asInt(-1);
-                    int c2i = vNode.path("cantileverIdx2").asInt(-1);
-                    String fromLabel = (c1i >= 0 && c1i < cArr.length)
-                            ? cArr[c1i].path("label").asText("Cantilever " + (c1i + 1)) : "?";
-                    String toLabel   = (c2i >= 0 && c2i < cArr.length)
-                            ? cArr[c2i].path("label").asText("Cantilever " + (c2i + 1)) : "?";
+                int configuredMaxDroppers = 11;
+                try {
+                    String pSettingsRaw = location.getProject() != null ? location.getProject().getSettings() : null;
+                    if (pSettingsRaw != null && !pSettingsRaw.isBlank()) {
+                        JsonNode pSettings = mapper.readTree(pSettingsRaw);
+                        if (pSettings.has("vane") && pSettings.get("vane").has("reportMaxDroppers")) {
+                            configuredMaxDroppers = pSettings.get("vane").get("reportMaxDroppers").asInt(11);
+                        }
+                    }
+                } catch (Exception ignored) { }
 
-                    addVaneHeader(doc, "Vane " + (vi + 1), vaneLabel, fromLabel, toLabel);
-
-                    JsonNode vr = vaneMap.get(vi);
-                    JsonNode droppers = (vr != null) ? vr.path("vane").path("results") : null;
-                    addVaneResultsTable(doc, droppers);
-
-                    doc.add(new Paragraph("").setMarginBottom(12));
-                }
+                addAllVanesTable(doc, vanesNode, vaneMap, cArr, configuredMaxDroppers);
             } else {
-                doc.add(styledParagraph("No vane data available.", 9, C_MUTED).setMarginTop(8));
+                doc.add(new Paragraph("No vane data available.").setFontSize(9).setMarginTop(8));
             }
 
             doc.close();
@@ -301,165 +276,248 @@ public class ReportService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Page elements
+    // Page elements - Black & White Styling
     // ─────────────────────────────────────────────────────────────────────────
 
     private void addCoverPage(Document doc, Location location) {
         doc.add(new Paragraph("").setMarginTop(120));
 
-        // Blue accent bar
-        Table bar = new Table(UnitValue.createPercentArray(new float[]{1})).useAllAvailableWidth();
-        bar.addCell(new Cell()
-            .add(new Paragraph("OCS TECHNICAL REPORT").setBold().setFontSize(20).setFontColor(C_WHITE))
-            .setBackgroundColor(C_BLUE).setPadding(14).setBorder(Border.NO_BORDER));
-        doc.add(bar);
+        doc.add(new Paragraph("OCS TECHNICAL REPORT")
+            .setBold().setFontSize(22)
+            .setBorderBottom(new SolidBorder(2f))
+            .setPaddingBottom(10));
 
-        doc.add(new Paragraph(location.getName()).setBold().setFontSize(15).setFontColor(C_NAVY).setMarginTop(16));
+        doc.add(new Paragraph(location.getName()).setBold().setFontSize(14).setMarginTop(16));
 
         String date = LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy"));
-        doc.add(styledParagraph("Generated: " + date, 9, C_MUTED));
+        doc.add(new Paragraph("Generated: " + date).setFontSize(10));
 
-        doc.add(new LineSeparator(new com.itextpdf.kernel.pdf.canvas.draw.SolidLine()).setMarginTop(30));
         doc.add(new AreaBreak(AreaBreakType.NEXT_PAGE));
     }
 
-    private void addSectionTitlePage(Document doc, String title, String subtitle, DeviceRgb bg) {
+    private void addSectionTitlePage(Document doc, String title, String subtitle) {
         doc.add(new Paragraph("").setMarginTop(120));
+        
+        doc.add(new Paragraph(title)
+            .setBold().setFontSize(20)
+            .setBorderBottom(new SolidBorder(2f))
+            .setPaddingBottom(10));
 
-        Table bar = new Table(UnitValue.createPercentArray(new float[]{1})).useAllAvailableWidth();
-        bar.addCell(new Cell()
-            .add(new Paragraph(title).setBold().setFontSize(20).setFontColor(C_WHITE))
-            .setBackgroundColor(bg).setPadding(14).setBorder(Border.NO_BORDER));
-        doc.add(bar);
-
-        doc.add(styledParagraph(subtitle, 11, C_MUTED).setMarginTop(14));
-        doc.add(new LineSeparator(new com.itextpdf.kernel.pdf.canvas.draw.SolidLine()).setMarginTop(30));
+        doc.add(new Paragraph(subtitle).setFontSize(11).setMarginTop(14));
     }
 
     private void addPoleHeader(Document doc, String title, double x, double z) {
-        Table h = new Table(UnitValue.createPercentArray(new float[]{1})).useAllAvailableWidth();
-        String pos = String.format("  ·  x: %.0f  z: %.0f", x, z);
-        h.addCell(new Cell()
-            .add(new Paragraph(title + pos).setBold().setFontSize(10).setFontColor(C_NAVY))
-            .setBackgroundColor(C_TH_BG).setPaddingTop(6).setPaddingBottom(6).setPaddingLeft(10)
-            .setBorder(Border.NO_BORDER)
-            .setBorderLeft(new SolidBorder(C_BLUE, 3)));
-        doc.add(h.setMarginTop(10).setMarginBottom(4));
+        String pos = String.format("  -  x: %.0f  z: %.0f", x, z);
+        doc.add(new Paragraph(title + pos)
+            .setBold().setFontSize(11)
+            .setMarginTop(15).setMarginBottom(4));
     }
 
     private void addCantiSubHeader(Document doc, String title) {
-        doc.add(styledParagraph(title, 9, C_MUTED).setItalic().setMarginLeft(10).setMarginBottom(3));
+        doc.add(new Paragraph(title)
+            .setFontSize(10).setItalic()
+            .setMarginLeft(10).setMarginBottom(4));
     }
-
-    private void addVaneHeader(Document doc, String vaneNum, String label, String fromLabel, String toLabel) {
-        String full = vaneNum + (label != null ? " — " + label : "")
-                + "   ·   " + fromLabel + " → " + toLabel;
-        Table h = new Table(UnitValue.createPercentArray(new float[]{1})).useAllAvailableWidth();
-        h.addCell(new Cell()
-            .add(new Paragraph(full).setBold().setFontSize(10).setFontColor(C_NAVY))
-            .setBackgroundColor(C_TH_BG).setPaddingTop(6).setPaddingBottom(6).setPaddingLeft(10)
-            .setBorder(Border.NO_BORDER)
-            .setBorderLeft(new SolidBorder(C_PURPLE, 3)));
-        doc.add(h.setMarginTop(10).setMarginBottom(4));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Tables
-    // ─────────────────────────────────────────────────────────────────────────
 
     private void addCantileverResultsTable(Document doc, JsonNode results) {
         String[] headers = {"Component", "Length (mm)", "Cut Length (mm)", "Diameter (mm)", "Thickness (mm)"};
         float[]  widths  = {44, 14, 14, 14, 14};
 
         Table table = new Table(UnitValue.createPercentArray(widths)).useAllAvailableWidth()
-                .setMarginLeft(10).setMarginBottom(8);
+                .setMarginLeft(10).setMarginBottom(10);
 
-        // Header row
-        for (String h : headers) {
-            table.addHeaderCell(thCell(h));
+        for (int i = 0; i < headers.length; i++) {
+            table.addHeaderCell(thCell(headers[i], i == 0 ? TextAlignment.LEFT : TextAlignment.RIGHT));
         }
 
         if (results != null && results.isArray() && results.size() > 0) {
-            int row = 0;
-            for (JsonNode r : results) {
-                DeviceRgb bg = (row % 2 == 0) ? C_WHITE : C_ROW_ALT;
-                table.addCell(tdCell(r.path("name").asText("-"), bg, false));
-                table.addCell(tdCell(fmt1(r.path("length").asDouble()), bg, true));
-                table.addCell(tdCell(fmt1(r.path("cut_length").asDouble()), bg, true));
-                table.addCell(tdCell(fmt1(r.path("diameter").asDouble()), bg, true));
-                table.addCell(tdCell(fmt1(r.path("thickness").asDouble()), bg, true));
-                row++;
+            int n = results.size();
+            for (int i = 0; i < n; i++) {
+                JsonNode r = results.get(i);
+                boolean isLast = (i == n - 1);
+                String rawName = r.path("name").asText("-");
+                String translatedName = translateComponentName(rawName);
+                table.addCell(tdCell(translatedName, TextAlignment.LEFT, isLast));
+                table.addCell(tdCell(fmt1(r.path("length").asDouble()), TextAlignment.RIGHT, isLast));
+                table.addCell(tdCell(fmt1(r.path("cut_length").asDouble()), TextAlignment.RIGHT, isLast));
+                table.addCell(tdCell(fmt1(r.path("diameter").asDouble()), TextAlignment.RIGHT, isLast));
+                table.addCell(tdCell(fmt1(r.path("thickness").asDouble()), TextAlignment.RIGHT, isLast));
             }
         } else {
-            table.addCell(new Cell(1, 5)
-                .add(new Paragraph("No results").setFontSize(8).setFontColor(C_MUTED))
-                .setTextAlignment(TextAlignment.CENTER)
-                .setBorder(new SolidBorder(C_BORDER, 0.5f)).setPadding(6));
+            table.addCell(emptyCell(5));
         }
 
         doc.add(table);
     }
 
-    private void addVaneResultsTable(Document doc, JsonNode droppers) {
-        String[] headers = {"#", "Dist. from A (m)", "Dropper–Dropper (m)",
-                            "Eye-to-Eye (m)", "CW Dist. (m)", "CW Height (m)"};
-        float[] widths = {7, 18, 18, 18, 18, 21};
+    private String translateComponentName(String name) {
+        if (name == null) return "-";
+        switch (name.toLowerCase()) {
+            case "stay_tube": return "Stay Tube";
+            case "bracket_tube": return "Bracket Tube";
+            case "steady_arm": return "Steady Arm";
+            case "register_arm": return "Register Arm";
+            case "steel_cable": return "Steel Cable";
+            case "reinforcement": return "Reinforcement";
+            default:
+                String[] words = name.split("_");
+                StringBuilder sb = new StringBuilder();
+                for (String w : words) {
+                    if (w.length() > 0) {
+                        sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1)).append(" ");
+                    }
+                }
+                return sb.toString().trim();
+        }
+    }
+
+    private void addAllVanesTable(Document doc, JsonNode vanesNode, Map<Integer, JsonNode> vaneMap, JsonNode[] cArr, int configuredMaxDroppers) {
+        int actualMaxDroppers = 0;
+        for (JsonNode vr : vaneMap.values()) {
+            JsonNode droppers = vr.path("vane").path("results");
+            if (droppers.isArray() && droppers.size() > actualMaxDroppers) {
+                actualMaxDroppers = droppers.size();
+            }
+        }
+        int maxDroppers = Math.max(configuredMaxDroppers, actualMaxDroppers);
+        
+        // Layout: Metric | Start Pole | 1 | 2 | ... | maxDroppers | End Pole
+        int totalColumns = maxDroppers + 3;
+        float[] widths = new float[totalColumns];
+        widths[0] = 20f; // Metric
+        widths[1] = 12f; // Start Pole
+        for (int i = 2; i < totalColumns - 1; i++) widths[i] = 56f / maxDroppers; // Droppers
+        widths[totalColumns - 1] = 12f; // End Pole
 
         Table table = new Table(UnitValue.createPercentArray(widths)).useAllAvailableWidth()
-                .setMarginLeft(10).setMarginBottom(8);
+                .setMarginLeft(0).setMarginBottom(10);
 
-        for (String h : headers) {
-            table.addHeaderCell(thCell(h));
+        // --- GLOBAL HEADER ---
+        table.addHeaderCell(thCell("Metric", TextAlignment.LEFT));
+        table.addHeaderCell(thCell("Start", TextAlignment.CENTER));
+        for (int i = 1; i <= maxDroppers; i++) {
+            table.addHeaderCell(thCell(String.valueOf(i), TextAlignment.CENTER));
         }
+        table.addHeaderCell(thCell("End", TextAlignment.CENTER));
 
-        if (droppers != null && droppers.isArray() && droppers.size() > 0) {
-            int row = 0;
-            for (JsonNode d : droppers) {
-                DeviceRgb bg = (row % 2 == 0) ? C_WHITE : C_ROW_ALT;
-                table.addCell(tdCell(String.valueOf(d.path("index").asInt(row) + 1), bg, true));
-                table.addCell(tdCell(fmt3(d.path("distance_pole_dropper").asDouble()), bg, true));
-                table.addCell(tdCell(fmt3(d.path("distance_dropper_dropper").asDouble()), bg, true));
-                table.addCell(tdCell(fmt3(d.path("distance_eye_to_eye").asDouble()), bg, true));
-                table.addCell(tdCell(fmt3(d.path("distance_cw").asDouble()), bg, true));
-                table.addCell(tdCell(fmt3(d.path("distance_cw_h").asDouble()), bg, true));
-                row++;
+        for (int vi = 0; vi < vanesNode.size(); vi++) {
+            JsonNode vNode = vanesNode.get(vi);
+            String vaneLabel = vNode.path("label").asText("");
+            if (vaneLabel.isBlank()) vaneLabel = "V" + (vi + 1);
+            
+            int c1i = vNode.path("cantileverIdx1").asInt(-1);
+            int c2i = vNode.path("cantileverIdx2").asInt(-1);
+            int p2i = vNode.path("poleIdx").asInt(-1);
+            
+            String fromLabel = (c1i >= 0 && c1i < cArr.length) ? cArr[c1i].path("label").asText("C" + (c1i + 1)) : "?";
+            String toLabel;
+            if (c2i >= 0 && c2i < cArr.length) {
+                toLabel = cArr[c2i].path("label").asText("C" + (c2i + 1));
+            } else if (p2i >= 0) {
+                toLabel = "Pole " + (p2i + 1);
+            } else {
+                toLabel = "?";
             }
-        } else {
-            table.addCell(new Cell(1, 6)
-                .add(new Paragraph("No dropper results").setFontSize(8).setFontColor(C_MUTED))
-                .setTextAlignment(TextAlignment.CENTER)
-                .setBorder(new SolidBorder(C_BORDER, 0.5f)).setPadding(6));
-        }
+            
+            JsonNode vr = vaneMap.get(vi);
+            JsonNode droppers = (vr != null) ? vr.path("vane").path("results") : null;
+            int numDroppers = (droppers != null && droppers.isArray()) ? Math.min(droppers.size(), maxDroppers) : 0;
+            
+            // --- VANE SUB-HEADER ROW ---
+            table.addCell(new Cell()
+                .add(new Paragraph(vaneLabel).setBold().setFontSize(9))
+                .setBorder(Border.NO_BORDER).setBorderTop(new SolidBorder(1f)).setBorderBottom(new SolidBorder(1f))
+                .setPaddingTop(4).setPaddingBottom(4).setPaddingLeft(4).setTextAlignment(TextAlignment.LEFT));
+                
+            table.addCell(new Cell()
+                .add(new Paragraph(fromLabel).setBold().setFontSize(9))
+                .setBorder(Border.NO_BORDER).setBorderTop(new SolidBorder(1f)).setBorderBottom(new SolidBorder(1f))
+                .setPaddingTop(4).setPaddingBottom(4).setTextAlignment(TextAlignment.CENTER));
+                
+            for (int i = 1; i <= maxDroppers; i++) {
+                table.addCell(new Cell()
+                    .add(new Paragraph("")).setBorder(Border.NO_BORDER).setBorderTop(new SolidBorder(1f)).setBorderBottom(new SolidBorder(1f)));
+            }
 
+            table.addCell(new Cell()
+                .add(new Paragraph(toLabel).setBold().setFontSize(9))
+                .setBorder(Border.NO_BORDER).setBorderTop(new SolidBorder(1f)).setBorderBottom(new SolidBorder(1f))
+                .setPaddingTop(4).setPaddingBottom(4).setTextAlignment(TextAlignment.CENTER));
+            
+            if (numDroppers == 0) {
+                table.addCell(new Cell(1, totalColumns)
+                    .add(new Paragraph("No dropper results").setFontSize(8).setItalic())
+                    .setBorder(Border.NO_BORDER).setBorderBottom(new SolidBorder(1f))
+                    .setPadding(4).setTextAlignment(TextAlignment.CENTER));
+                continue;
+            }
+
+            String[] metricLabels = {
+                "Dropper Length (m)", "Eye-to-Eye (m)", "CW Dist (m)", "Dist from A (m)", "Tilt (°)"
+            };
+            String[] metricKeys = {
+                "dropper_length", "distance_eye_to_eye", "distance_cw", "distance_pole_dropper", "dropper_inclination"
+            };
+
+            for (int m = 0; m < metricLabels.length; m++) {
+                boolean isLastMetric = (m == metricLabels.length - 1);
+                table.addCell(tdCell(metricLabels[m], TextAlignment.LEFT, isLastMetric));
+                
+                table.addCell(tdCell("-", TextAlignment.CENTER, isLastMetric)); // Pole A column
+                
+                for (int d = 0; d < maxDroppers; d++) {
+                    if (d < numDroppers) {
+                        JsonNode dropNode = droppers.get(d);
+                        String val = fmt3(dropNode.path(metricKeys[m]).asDouble(0));
+                        table.addCell(tdCell(val, TextAlignment.CENTER, isLastMetric));
+                    } else {
+                        table.addCell(tdCell("-", TextAlignment.CENTER, isLastMetric));
+                    }
+                }
+
+                table.addCell(tdCell("-", TextAlignment.CENTER, isLastMetric)); // Pole B column
+            }
+        }
+        
         doc.add(table);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Cell helpers
+    // Cell helpers - Borders removed, simple lines added
     // ─────────────────────────────────────────────────────────────────────────
 
-    private Cell thCell(String text) {
+    private Cell thCell(String text, TextAlignment alignment) {
         return new Cell()
-                .add(new Paragraph(text).setBold().setFontSize(8).setFontColor(C_NAVY))
-                .setBackgroundColor(C_TH_BG)
-                .setBorder(new SolidBorder(C_BORDER, 0.5f))
-                .setPaddingTop(5).setPaddingBottom(5).setPaddingLeft(5).setPaddingRight(5)
-                .setTextAlignment(TextAlignment.CENTER);
+                .add(new Paragraph(text).setBold().setFontSize(9))
+                .setBorder(Border.NO_BORDER)
+                .setBorderTop(new SolidBorder(1f))
+                .setBorderBottom(new SolidBorder(1f))
+                .setPaddingTop(4).setPaddingBottom(4).setPaddingLeft(4).setPaddingRight(4)
+                .setTextAlignment(alignment);
     }
 
-    private Cell tdCell(String text, DeviceRgb bg, boolean center) {
-        return new Cell()
-                .add(new Paragraph(text).setFontSize(8).setFontColor(C_NAVY))
-                .setBackgroundColor(bg)
-                .setBorder(new SolidBorder(C_BORDER, 0.3f))
-                .setPaddingTop(4).setPaddingBottom(4).setPaddingLeft(5).setPaddingRight(5)
-                .setTextAlignment(center ? TextAlignment.CENTER : TextAlignment.LEFT);
+    private Cell tdCell(String text, TextAlignment alignment, boolean isLastRow) {
+        Cell cell = new Cell()
+                .add(new Paragraph(text).setFontSize(9))
+                .setBorder(Border.NO_BORDER)
+                .setPaddingTop(3).setPaddingBottom(3).setPaddingLeft(4).setPaddingRight(4)
+                .setTextAlignment(alignment);
+        
+        if (isLastRow) {
+            cell.setBorderBottom(new SolidBorder(1f));
+        }
+        return cell;
     }
 
-    private Paragraph styledParagraph(String text, float size, DeviceRgb color) {
-        return new Paragraph(text).setFontSize(size).setFontColor(color);
+    private Cell emptyCell(int colspan) {
+        return new Cell(1, colspan)
+                .add(new Paragraph("No results").setFontSize(9))
+                .setTextAlignment(TextAlignment.CENTER)
+                .setBorder(Border.NO_BORDER)
+                .setBorderBottom(new SolidBorder(1f))
+                .setPadding(6);
     }
 
-    private String fmt1(double v) { return v == 0 ? "—" : String.format("%.1f", v); }
-    private String fmt3(double v) { return v == 0 ? "—" : String.format("%.3f", v); }
+    private String fmt1(double v) { return v == 0 ? "—" : String.format(Locale.US, "%.1f", v); }
+    private String fmt3(double v) { return v == 0 ? "—" : String.format(Locale.US, "%.3f", v); }
 }

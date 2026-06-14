@@ -250,6 +250,19 @@ export function ProjectSettingsPanel({ settings, onSave, onClose }: Props) {
               <input type="number" min={0} value={form.vane.qtyDroppers}
                 onChange={e => setV('qtyDroppers', +e.target.value)} style={INPUT} />
             </Field>
+            <Field label="Lifting Start Dist. (mm)">
+              <input type="number" min={0} value={form.vane.liftingStartDistance ?? ''}
+                placeholder="Length / 2"
+                onChange={e => setV('liftingStartDistance', e.target.value === '' ? undefined : +e.target.value)} style={INPUT} />
+            </Field>
+          </Row>
+
+          <Section title="Report" />
+          <Row>
+            <Field label="Max Dropper Columns" hint="Maximum droppers to show in a single row for the PDF report.">
+              <input type="number" min={1} value={form.vane.reportMaxDroppers ?? 11}
+                onChange={e => setV('reportMaxDroppers', +e.target.value)} style={INPUT} />
+            </Field>
           </Row>
 
           {/* ── Anchor Point ── */}

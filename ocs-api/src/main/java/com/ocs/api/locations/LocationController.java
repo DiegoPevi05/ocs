@@ -146,23 +146,31 @@ public class LocationController {
                     for (int ci = 0; ci < numCantis; ci++) cArr[ci] = cantileversNode.get(ci);
                     for (int vi = 0; vi < vanesNode.size(); vi++) {
                         com.fasterxml.jackson.databind.JsonNode v = vanesNode.get(vi);
-                        int c1i = v.path("cantileverIdx1").asInt(-1), c2i = v.path("cantileverIdx2").asInt(-1);
-                        if (c1i < 0 || c2i < 0 || c1i >= numCantis || c2i >= numCantis) {
+                        int c1i = v.path("cantileverIdx1").asInt(-1);
+                        int c2i = v.path("cantileverIdx2").asInt(-1);
+                        int p2i = v.path("poleIdx").asInt(-1);
+
+                        if (c1i < 0 || c1i >= numCantis || (c2i < 0 && p2i < 0)) {
                             final int fvi = vi;
                             vaneMonos.add(reactor.core.publisher.Mono.just(mapper.createObjectNode().put("_vaneIdx", fvi).put("status", "skip")));
                             continue;
                         }
-                        com.fasterxml.jackson.databind.JsonNode c1 = cArr[c1i], c2 = cArr[c2i];
+
+                        com.fasterxml.jackson.databind.JsonNode c1 = cArr[c1i];
+                        com.fasterxml.jackson.databind.JsonNode c2 = (c2i >= 0 && c2i < numCantis) ? cArr[c2i] : null;
+
                         double cwH1 = c1.path("contactWireHeight").asDouble(5400), sH1 = c1.path("systemHeight").asDouble(1000);
                         double cwo1 = c1.path("contactWireVerticalOffset").asDouble(120);
-                        double cwH2 = c2.path("contactWireHeight").asDouble(5400), sH2 = c2.path("systemHeight").asDouble(1000);
-                        double cwo2 = c2.path("contactWireVerticalOffset").asDouble(120);
+
+                        double cwH2 = c2 != null ? c2.path("contactWireHeight").asDouble(5400) : v.path("poleContactWireHeight").asDouble(5400);
+                        double sH2 = c2 != null ? c2.path("systemHeight").asDouble(1000) : v.path("poleSystemHeight").asDouble(1000);
+                        double cwo2 = c2 != null ? c2.path("contactWireVerticalOffset").asDouble(120) : 0;
 
                         com.fasterxml.jackson.databind.node.ObjectNode vp = mapper.createObjectNode();
                         com.fasterxml.jackson.databind.node.ArrayNode cwS = mapper.createArrayNode(); cwS.add(c1.path("x2").asDouble()).add(cwH1 + cwo1).add(-c1.path("z2").asDouble()); vp.set("cw_start", cwS);
                         com.fasterxml.jackson.databind.node.ArrayNode swS = mapper.createArrayNode(); swS.add(c1.path("x2").asDouble()).add(cwH1 + cwo1 + sH1).add(-c1.path("z2").asDouble()); vp.set("sw_start", swS);
-                        com.fasterxml.jackson.databind.node.ArrayNode cwE = mapper.createArrayNode(); cwE.add(c2.path("x2").asDouble()).add(cwH2 + cwo2).add(-c2.path("z2").asDouble()); vp.set("cw_end", cwE);
-                        com.fasterxml.jackson.databind.node.ArrayNode swE = mapper.createArrayNode(); swE.add(c2.path("x2").asDouble()).add(cwH2 + cwo2 + sH2).add(-c2.path("z2").asDouble()); vp.set("sw_end", swE);
+                        com.fasterxml.jackson.databind.node.ArrayNode cwE = mapper.createArrayNode(); cwE.add(v.path("x2").asDouble()).add(cwH2 + cwo2).add(-v.path("z2").asDouble()); vp.set("cw_end", cwE);
+                        com.fasterxml.jackson.databind.node.ArrayNode swE = mapper.createArrayNode(); swE.add(v.path("x2").asDouble()).add(cwH2 + cwo2 + sH2).add(-v.path("z2").asDouble()); vp.set("sw_end", swE);
                         vp.put("qty_droppers",       v.path("qtyDroppers").asInt(0));
                         vp.put("initial_separation", v.path("initialSeparation").asDouble(5000));
                         vp.put("step_size",          500);

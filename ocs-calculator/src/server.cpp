@@ -118,15 +118,16 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
         { 150.0, 50.0, 100.0 }, { 50.0 }
     };
     auto steadyArmParams = assemblies::SteadyArmParams{
-        steadyArmAlpha, steadyArmLength, 100.0, std::nullopt, std::nullopt,
-        { 33.7, 2.5 }, 
+        steadyArmAlpha, steadyArmLength, 100.0, 
+        250.0, // eye_clamp_distance (for SBA)
+        components::StainlessSteelWireRope{6.0}, // stainless_steel_wire_rope (for SBA)
+        { 33.7, 2.5 }, // tube
         components::HookEndFitting{100.0, 20.0},
         components::HookEndClamp{50.0, 40.0, 10.0, 10.0},
         components::SwivelClip{40.0, 30.0, 15.0},
-        std::nullopt,
+        components::EyeClamp{35.0}, // eye_clamp (for SBA)
         components::ClampHolderContactWire{50, 40, 30, 0}
     };
-    
     assemblies::RegisterArmParams regParams;
     regParams.alpha = registerArmAlpha;
     regParams.drop_bracket_distance = 150.0;

@@ -89,10 +89,13 @@ export interface CantileverData {
 }
 export interface VaneData {
   id?: string; label?: string;
-  // Parent cantilever indices (required — a vane always links exactly 2 cantilevers)
+  // Parent indices (a vane links a cantilever to another cantilever or to a pole)
   cantileverIdx1: number;
-  cantileverIdx2: number;
-  // Derived 2D positions (cached from cantilevers[idx].x2/z2 for rendering)
+  cantileverIdx2?: number;
+  poleIdx?: number;
+  poleContactWireHeight?: number; // mm
+  poleSystemHeight?: number;      // mm
+  // Derived 2D positions (cached for rendering)
   x1: number; z1: number;
   x2: number; z2: number;
   // User-configurable
@@ -218,13 +221,14 @@ export interface ProjectSettings {
   };
   vane: {
     cwWeight: number;
-    swWeight: number;
     cwTension: number;
+    swWeight: number;
     swTension: number;
     dropperWeight: number;
     initialSeparation: number;
     qtyDroppers: number;
     liftingStartDistance?: number;
+    reportMaxDroppers?: number;
   };
   anchorPoint: {
     width: number;               // mm, default plate width
@@ -265,6 +269,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
     initialSeparation: 5000,
     qtyDroppers: 0,
     liftingStartDistance: undefined,
+    reportMaxDroppers: 11,
   },
   anchorPoint: {
     width: 400,

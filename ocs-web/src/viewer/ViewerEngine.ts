@@ -511,17 +511,32 @@ export class ViewerEngine {
       }
     }
 
-    // Vane snapping — snap to nearest cantilever track-side endpoint (x2,z2)
+    // Vane snapping — snap to nearest cantilever track-side endpoint (x2,z2) or pole (if second click)
     if (this.drawMode === 'vane') {
       const cantilevers = this.dynData.cantilevers || [];
+      const poles = this.dynData.poles || [];
+      const firstCantIdx = this.dynData.vaneFirstCantIdx ?? null;
+
       let closestPt: THREE.Vector2 | null = null;
       let minD = 5000;
-      let closestIdx = -1;
+      
+      this.snapCantileverIdx = -1;
+      this.snapPoleIdx = -1;
+
+      // 1. Check cantilevers
       cantilevers.forEach((c: any, i: number) => {
         const d = Math.hypot(wx - c.x2, wz - c.z2);
-        if (d < minD) { minD = d; closestPt = new THREE.Vector2(c.x2, c.z2); closestIdx = i; }
+        if (d < minD) { minD = d; closestPt = new THREE.Vector2(c.x2, c.z2); this.snapCantileverIdx = i; this.snapPoleIdx = -1; }
       });
-      this.snapCantileverIdx = closestIdx;
+
+      // 2. Check poles (only allowed if it's the second click)
+      if (firstCantIdx !== null) {
+        poles.forEach((p: any, i: number) => {
+          const d = Math.hypot(wx - p.x, wz - (p.z || 0));
+          if (d < minD) { minD = d; closestPt = new THREE.Vector2(p.x, p.z || 0); this.snapPoleIdx = i; this.snapCantileverIdx = -1; }
+        });
+      }
+
       if (closestPt) return closestPt;
     }
 
@@ -587,7 +602,7 @@ export class ViewerEngine {
 
       if (document.activeElement !== xInput) xInput.value = Math.round(wx).toString();
       if (document.activeElement !== zInput) zInput.value = Math.round(wz).toString();
-      if (document.activeElement !== yInput) {
+      if (document.activeElement !== yInput && yInput.value === '') {
         const prevY = this.dynData.trackPoints.length > 0 ? this.dynData.trackPoints[this.dynData.trackPoints.length - 1].y || 0 : 0;
         yInput.value = prevY.toString();
       }
@@ -1156,6 +1171,7 @@ export class ViewerEngine {
       this.rubberbandGroup.add(cyl);
     } else if (this.drawMode === 'vane') {
       const cantilevers = this.dynData.cantilevers || [];
+      const poles = this.dynData.poles || [];
       const firstCantIdx: number | null = this.dynData.vaneFirstCantIdx ?? null;
 
       // Draw purple dot at every cantilever track endpoint
@@ -1172,6 +1188,22 @@ export class ViewerEngine {
         dot.layers.set(1);
         this.rubberbandGroup.add(dot);
       });
+
+      // Draw dot at every pole if we are on the second click
+      if (firstCantIdx !== null) {
+        poles.forEach((p: any, i: number) => {
+          const isSnapped = this.snapPoleIdx === i;
+          const color = isSnapped ? 0xd946ef : 0x9333ea;
+          const radius = isSnapped ? 140 : 90;
+          const cgeo = new THREE.CircleGeometry(radius, 16);
+          cgeo.rotateX(-Math.PI / 2);
+          const cmat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+          const dot = new THREE.Mesh(cgeo, cmat);
+          dot.position.set(p.x, 1, p.z || 0);
+          dot.layers.set(1);
+          this.rubberbandGroup.add(dot);
+        });
+      }
 
       // If first cantilever selected, draw dashed line to cursor
       if (firstCantIdx !== null && cantilevers[firstCantIdx]) {

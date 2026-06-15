@@ -38,14 +38,24 @@ export interface ApiResponse {
 // ─── Viewer state types ────────────────────────────────────────────────────────
 
 export type ViewMode = '2D' | '3D';
-export type DrawMode = 'none' | 'track' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor';
+export type DrawMode = 'none' | 'track' | 'foundation' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor';
 
 // ─── Scene drawing types ───────────────────────────────────────────────────────
+
+export interface FoundationData {
+  id?: string; label?: string;
+  x: number; z: number; y?: number;
+  width?: number; // mm
+  length?: number; // mm
+  depth?: number; // mm
+}
 
 export interface TrackPoint { x: number; z: number; y?: number; r?: number; }
 export interface TrackData { id?: string; label: string; points: TrackPoint[]; }
 export interface PoleData {
-  id?: string; label?: string; x: number; z: number; y?: number; h?: number;
+  id?: string; label?: string;
+  foundationIdx?: number;
+  x: number; z: number; y?: number; h?: number;
   cantileversQuantity?: number;  // how many catenary wires on this pole, default 1
   catSeparation?: number;        // vertical separation between catenary wires mm, default 720
 
@@ -186,6 +196,7 @@ export interface AnchorData {
 }
 
 export interface SceneData {
+  foundations: FoundationData[];
   tracks: TrackData[];
   poles: PoleData[];
   cantilevers: CantileverData[];
@@ -200,6 +211,11 @@ export interface SceneData {
 
 export interface ProjectSettings {
   catenarySystem: 'DOUBLE_WIRE' | 'SINGLE_WIRE';
+  foundation: {
+    width: number;
+    length: number;
+    depth: number;
+  };
   pole: {
     height: number;
     squareHollowWidth: number;
@@ -241,6 +257,11 @@ export interface ProjectSettings {
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   catenarySystem: 'DOUBLE_WIRE',
+  foundation: {
+    width: 600,
+    length: 600,
+    depth: 1000,
+  },
   pole: {
     height: 3000,
     squareHollowWidth: 160,

@@ -45,6 +45,7 @@ export class ViewerEngine {
   public snapCantileverIdx: number = -1;
   public snapPoleIdx: number = -1;
   public snapAnchorPointIdx: number = -1;
+  public snapFoundationIdx: number = -1;
 
   // Grid (2D)
   private gridGroup: THREE.Group;
@@ -496,6 +497,20 @@ export class ViewerEngine {
       if (closestObj) return closestObj;
     }
 
+    // Pole snapping — snap to foundation center
+    if (this.drawMode === 'pole') {
+      const foundations = this.dynData.foundations || [];
+      let closestFoundation: THREE.Vector2 | null = null;
+      let minD = Infinity;
+      let closestIdx = -1;
+      foundations.forEach((f: any, i: number) => {
+        const d = Math.hypot(wx - f.x, wz - f.z);
+        if (d < minD) { minD = d; closestFoundation = new THREE.Vector2(f.x, f.z); closestIdx = i; }
+      });
+      this.snapFoundationIdx = closestIdx;
+      if (closestFoundation && minD < 5000) return closestFoundation;
+    }
+
     // Cantilever snapping
     if (this.drawMode === 'cantilever') {
       const cantPts = this.dynData.cantileverPoints || [];
@@ -854,7 +869,7 @@ export class ViewerEngine {
       const r = parseFloat(((this as any)._rInput as HTMLInputElement)?.value) || 0;
       const y = parseFloat(((this as any)._yInput as HTMLInputElement)?.value) || 0;
       this.container.dispatchEvent(new CustomEvent('viewer-click', {
-        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx, poleIdx: this.snapPoleIdx, anchorPointIdx: this.snapAnchorPointIdx }
+        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx, poleIdx: this.snapPoleIdx, anchorPointIdx: this.snapAnchorPointIdx, foundationIdx: this.snapFoundationIdx }
       }));
     } else if (e.button === 0 && this.drawMode === 'none') {
       this.isSelecting = true;
@@ -1484,6 +1499,51 @@ export class ViewerEngine {
       data.completedTracks.forEach((tr: any, i: number) => renderTrack(tr, false, data.selectedTracks?.includes(i) || false, i));
     }
     renderTrack(data.trackPoints, true, false);
+
+    // Render foundations as squares with dots
+    if (data.foundations) {
+      data.foundations.forEach((f: any, i: number) => {
+        const isSelected = data.selectedFoundations?.includes(i) || false;
+        const isHovered = this.hoveredState?.type === 'foundation' && this.hoveredState?.index === i;
+        const fColor = isSelected ? 0xffa500 : (isHovered ? 0x22c55e : 0x16a34a); // green foundations
+        
+        const w = f.width ?? 600;
+        const l = f.length ?? 600;
+        
+        // 2D Square
+        const rectGeo = new THREE.PlaneGeometry(w, l);
+        rectGeo.rotateX(-Math.PI / 2);
+        const rectMat = new THREE.MeshBasicMaterial({ color: fColor, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+        const rectEdgeGeo = new THREE.EdgesGeometry(rectGeo);
+        const rectEdgeMat = new THREE.LineBasicMaterial({ color: fColor });
+        
+        const mesh2d = new THREE.Mesh(rectGeo, rectMat);
+        mesh2d.position.set(f.x, f.y || 0, f.z);
+        mesh2d.layers.set(1);
+        
+        const edges2d = new THREE.LineSegments(rectEdgeGeo, rectEdgeMat);
+        edges2d.position.set(f.x, f.y || 0, f.z);
+        edges2d.layers.set(1);
+
+        const dotGeo = new THREE.CircleGeometry(100, 16);
+        dotGeo.rotateX(-Math.PI / 2);
+        const dot2d = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: fColor }));
+        dot2d.position.set(f.x, (f.y || 0) + 1, f.z);
+        dot2d.layers.set(1);
+
+        this.dynamicGroup.add(mesh2d, edges2d, dot2d);
+
+        // 3D representation (flat prism/slab)
+        const visualHeight = 50; // smallest height to represent the concrete pad
+        const boxGeo = new THREE.BoxGeometry(w, visualHeight, l);
+        boxGeo.translate(0, -visualHeight / 2, 0); // extend slightly downwards so the pole rests exactly on top
+        const boxMat = new THREE.MeshPhongMaterial({ color: fColor });
+        const mesh3d = new THREE.Mesh(boxGeo, boxMat);
+        mesh3d.position.set(f.x, f.y || 0, -(f.z));
+        mesh3d.layers.set(2);
+        this.dynamicGroup.add(mesh3d);
+      });
+    }
 
     // Render poles as circles in 2D / cylinders in 3D
     data.poles.forEach((p: any, i: number) => {

@@ -11,6 +11,7 @@ import { api, parseSceneData, parseProjectSettings } from '../lib/api';
 import { CantileverPanel } from '../components/CantileverPanel';
 import { VanePanel } from '../components/VanePanel';
 import { PolePanel } from '../components/PolePanel';
+import { FoundationPanel } from '../components/FoundationPanel';
 import { AnchorPointPanel } from '../components/AnchorPointPanel';
 import { AnchorPanel } from '../components/AnchorPanel';
 import type { DrawMode, ViewMode, SceneData, Location, TrackData, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
@@ -152,6 +153,7 @@ export default function EditorPage() {
   const [poles, setPoles] = useState<PoleData[]>([]);
   const [cantilevers, setCantilevers] = useState<CantileverData[]>([]);
   const [vanes, setVanes] = useState<VaneData[]>([]);
+  const [foundations, setFoundations] = useState<FoundationData[]>([]);
   const [vaneFirstCantIdx, setVaneFirstCantIdx] = useState<number | null>(null);
   const [anchorPoints, setAnchorPoints] = useState<AnchorPointData[]>([]);
   const [anchors, setAnchors] = useState<AnchorData[]>([]);
@@ -160,14 +162,16 @@ export default function EditorPage() {
   // Selection
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
   const [selectedPoles, setSelectedPoles] = useState<number[]>([]);
+  const [selectedFoundations, setSelectedFoundations] = useState<number[]>([]);
   const [selectedCantilevers, setSelectedCantilevers] = useState<number[]>([]);
   const [selectedVanes, setSelectedVanes] = useState<number[]>([]);
   const [selectedAnchorPoints, setSelectedAnchorPoints] = useState<number[]>([]);
   const [selectedAnchors, setSelectedAnchors] = useState<number[]>([]);
-  const [selFilter, setSelFilter] = useState({ tracks: true, poles: true, cantilevers: true, vanes: true, anchorPoints: true, anchors: true });
+  const [selFilter, setSelFilter] = useState({ tracks: true, poles: true, foundations: true, cantilevers: true, vanes: true, anchorPoints: true, anchors: true });
 
   // Creation modals
-  const [poleModal, setPoleModal] = useState<{ x: number; z: number; y: number } | null>(null);
+  const [poleModal, setPoleModal] = useState<{ x: number; z: number; y: number; foundationIdx?: number } | null>(null);
+  const [foundationModal, setFoundationModal] = useState<FoundationData | null>(null);
   const [trackModal, setTrackModal] = useState<{ x: number; z: number; y?: number; r?: number }[] | null>(null);
   const [cantileverModal, setCantileverModal] = useState<{ x1: number; z1: number; x2raw: number; z2raw: number; tx: number; tz: number } | null>(null);
   const [vaneModal, setVaneModal] = useState<{ x1: number; z1: number; x2: number; z2: number } | null>(null);
@@ -179,6 +183,7 @@ export default function EditorPage() {
 
   // Edit modals
   const [editPoleIdx, setEditPoleIdx] = useState<number | null>(null);
+  const [editFoundationIdx, setEditFoundationIdx] = useState<number | null>(null);
   const [editCantileverIdx, setEditCantileverIdx] = useState<number | null>(null);
   const [editVaneIdx, setEditVaneIdx] = useState<number | null>(null);
 
@@ -220,6 +225,8 @@ export default function EditorPage() {
   useEffect(() => { completedTracksRef.current = completedTracks; }, [completedTracks]);
   const polesRef = useRef(poles);
   useEffect(() => { polesRef.current = poles; }, [poles]);
+  const foundationsRef = useRef(foundations);
+  useEffect(() => { foundationsRef.current = foundations; }, [foundations]);
   const cantileversRef = useRef(cantilevers);
   useEffect(() => { cantileversRef.current = cantilevers; }, [cantilevers]);
   const vanesRef = useRef(vanes);
@@ -232,8 +239,8 @@ export default function EditorPage() {
   useEffect(() => { selectedTracksRef.current = selectedTracks; }, [selectedTracks]);
   const selectedPolesRef = useRef(selectedPoles);
   useEffect(() => { selectedPolesRef.current = selectedPoles; }, [selectedPoles]);
-  const selectedCantiRef = useRef(selectedCantilevers);
-  useEffect(() => { selectedCantiRef.current = selectedCantilevers; }, [selectedCantilevers]);
+  const selectedFoundationsRef = useRef(selectedFoundations);
+  useEffect(() => { selectedFoundationsRef.current = selectedFoundations; }, [selectedFoundations]);
   const selectedVanesRef = useRef(selectedVanes);
   useEffect(() => { selectedVanesRef.current = selectedVanes; }, [selectedVanes]);
   const vaneFirstCantIdxRef = useRef(vaneFirstCantIdx);
@@ -274,6 +281,7 @@ export default function EditorPage() {
       setLocation(loc);
       const scene = parseSceneData(loc);
       if (scene) {
+        setFoundations(scene.foundations ?? []);
         setCompletedTracks(scene.tracks.map(t => t.points.map(p => ({ ...p, label: t.label }))));
         setPoles(scene.poles);
         setCantilevers(scene.cantilevers);
@@ -431,8 +439,19 @@ export default function EditorPage() {
   // Sync dynamic geometry to engine
   useEffect(() => {
     const s = projectSettings.anchorPoint;
+    
+    // Apply foundation coordinates to poles
+    const syncedPoles = poles.map(p => {
+      if (p.foundationIdx !== undefined && foundations[p.foundationIdx]) {
+        const f = foundations[p.foundationIdx];
+        return { ...p, x: f.x, z: f.z, y: f.y };
+      }
+      return p;
+    });
+
     engineRef.current?.setDynamicGeometry({
-      trackPoints, poles, completedTracks, selectedTracks, selectedPoles,
+      foundations, selectedFoundations,
+      trackPoints, poles: syncedPoles, completedTracks, selectedTracks, selectedPoles,
       cantileverPoints: [], cantilevers, vanes, vaneFirstCantIdx,
       selectedCantilevers, selectedVanes,
       anchorPoints, anchors, anchorFirstPoleIdx,
@@ -441,7 +460,7 @@ export default function EditorPage() {
       anchorPointPreviewLength: s.length,
       anchorPointPreviewHeight: s.height,
     });
-  }, [trackPoints, poles, completedTracks, selectedTracks, selectedPoles, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes, anchorPoints, anchors, anchorFirstPoleIdx, selectedAnchorPoints, selectedAnchors, projectSettings.anchorPoint]);
+  }, [trackPoints, poles, foundations, completedTracks, selectedTracks, selectedPoles, selectedFoundations, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes, anchorPoints, anchors, anchorFirstPoleIdx, selectedAnchorPoints, selectedAnchors, projectSettings.anchorPoint]);
 
   // Auto-fit camera in 2D whenever tracks or poles are added (runs after geometry update above).
   useEffect(() => {
@@ -476,7 +495,17 @@ export default function EditorPage() {
       const payloads = cantiList.map(c => {
         const footX = c.x2raw ?? c.x2;
         const footZ = c.z2raw ?? c.z2;
-        const matchPole = polesRef.current.find(p => Math.hypot(p.x - c.x1, p.z - c.z1) < 500);
+        
+        const matchPole = polesRef.current.find(p => {
+          let pX = p.x;
+          let pZ = p.z || 0;
+          if (p.foundationIdx !== undefined && foundationsRef.current[p.foundationIdx]) {
+              const f = foundationsRef.current[p.foundationIdx];
+              pX = f.x;
+              pZ = f.z;
+          }
+          return Math.hypot(pX - c.x1, pZ - c.z1) < 500;
+        });
         return {
           configuration: c.configuration ?? 'TDP>2.2',
           contactWireConfiguration: c.contactWireConfiguration ?? projectWireConfig,
@@ -523,13 +552,38 @@ export default function EditorPage() {
       const sysH2 = c2 ? (c2.systemHeight ?? 1000) : (v.poleSystemHeight ?? 1000);
       const cwo2 = c2 ? (c2.contactWireVerticalOffset ?? 120) : 0; // offset is usually 0 if attached directly to pole face
 
+      // If attached to a pole, recalculate attachment point based on latest pole coordinate
+      let endX = v.x2;
+      let endZ = v.z2;
+      if (v.poleIdx !== undefined && polesRef.current[v.poleIdx]) {
+        const p = polesRef.current[v.poleIdx];
+        
+        // Check if pole is linked to a foundation, if so use foundation coordinates
+        let pX = p.x;
+        let pZ = p.z || 0;
+        if (p.foundationIdx !== undefined && foundationsRef.current[p.foundationIdx]) {
+            const f = foundationsRef.current[p.foundationIdx];
+            pX = f.x;
+            pZ = f.z;
+        }
+
+        const foot = closestPointOnTracks(completedTracksRef.current, pX, pZ);
+        const vToC1x = c1.x2 - pX;
+        const vToC1z = c1.z2 - pZ;
+        const dot = vToC1x * foot.tx + vToC1z * foot.tz;
+        const sign = dot >= 0 ? 1 : -1;
+        const offset = (p.width || 300) / 2;
+        endX = pX + sign * foot.tx * offset;
+        endZ = pZ + sign * foot.tz * offset;
+      }
+
       // cwAxis.y = contactWireHeight + contactWireVerticalOffset (invert(viaDir) = up)
       const payload = {
         _vaneIdx: startIndex + vIdx,
         cw_start: [c1.x2, cwH1 + cwo1, -c1.z2],
         sw_start: [c1.x2, cwH1 + cwo1 + sysH1, -c1.z2],
-        cw_end: [v.x2, cwH2 + cwo2, -v.z2],
-        sw_end: [v.x2, cwH2 + cwo2 + sysH2, -v.z2],
+        cw_end: [endX, cwH2 + cwo2, -endZ],
+        sw_end: [endX, cwH2 + cwo2 + sysH2, -endZ],
         qty_droppers: v.qtyDroppers ?? 0,
         initial_separation: v.initialSeparation ?? 5000,
         step_size: 500,  // fixed 500mm rendering grid for smooth wire curves
@@ -557,6 +611,7 @@ export default function EditorPage() {
     vaneList = vanesRef.current,
     apList = anchorPointsRef.current,
     aList = anchorsRef.current,
+    foundationList = foundationsRef.current,
   ) => {
     if (!locationId || !location) return;
 
@@ -564,7 +619,7 @@ export default function EditorPage() {
       label: tr[0]?.label ?? '', points: tr.map(({ label: _l, ...rest }) => rest),
     }));
 
-    const scene: SceneData = { tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList, anchorPoints: apList, anchors: aList };
+    const scene: SceneData = { foundations: foundationList, tracks: trackData, poles: poleList, cantilevers: cantList, vanes: vaneList, anchorPoints: apList, anchors: aList };
     setSaving(true); setSaveError(null);
     try {
       await api.locations.update(locationId, location.name, scene);
@@ -578,7 +633,7 @@ export default function EditorPage() {
   // viewer-click handler
   useEffect(() => {
     const handleViewerClick = (e: Event) => {
-      const { x, z, y, r, mode, cantileverIdx, poleIdx, anchorPointIdx } = (e as CustomEvent).detail;
+      const { x, z, y, r, mode, cantileverIdx, poleIdx, anchorPointIdx, foundationIdx } = (e as CustomEvent).detail;
 
       if (mode === 'track') {
         const newPoints = [...trackPointsRef.current, { x, z, y, r }];
@@ -607,8 +662,11 @@ export default function EditorPage() {
           setTrackPoints(newPoints);
         }
 
+      } else if (mode === 'foundation') {
+        setFoundationModal({ x, z, y, label: '' });
+
       } else if (mode === 'pole') {
-        setPoleModal({ x, z, y });
+        setPoleModal({ x, z, y, foundationIdx: foundationIdx !== -1 ? foundationIdx : undefined });
 
       } else if (mode === 'cantilever') {
         const foot = closestPointOnTracks(completedTracksRef.current, x, z);
@@ -757,6 +815,7 @@ export default function EditorPage() {
       if (isPoint && hovered) {
         setSelectedTracks(hovered.type === 'track' ? [hovered.index] : []);
         setSelectedPoles(hovered.type === 'pole' ? [hovered.index] : []);
+        setSelectedFoundations(hovered.type === 'foundation' ? [hovered.index] : []);
         setSelectedCantilevers(hovered.type === 'cantilever' ? [hovered.index] : []);
         setSelectedVanes(hovered.type === 'vane' ? [hovered.index] : []);
         setSelectedAnchorPoints(hovered.type === 'anchorPoint' ? [hovered.index] : []);
@@ -766,6 +825,7 @@ export default function EditorPage() {
 
       const selT = new Set<number>();
       const selP = new Set<number>();
+      const selF = new Set<number>();
       const selC = new Set<number>();
       const selV = new Set<number>();
       const selAP = new Set<number>();
@@ -812,6 +872,11 @@ export default function EditorPage() {
           if (inB(p.x, p.z)) { selP.add(i); if (p.label) matchedLabels.add(p.label); }
         });
       }
+      if (selFilterRef.current.foundations) {
+        foundationsRef.current.forEach((f, i) => {
+          if (inB(f.x, f.z)) { selF.add(i); if (f.label) matchedLabels.add(f.label); }
+        });
+      }
       if (selFilterRef.current.cantilevers) {
         cantileversRef.current.forEach((c, i) => {
           if (lineInB(c.x1, c.z1, c.x2, c.z2)) selC.add(i);
@@ -834,6 +899,7 @@ export default function EditorPage() {
       }
       setSelectedTracks(Array.from(selT));
       setSelectedPoles(Array.from(selP));
+      setSelectedFoundations(Array.from(selF));
       setSelectedCantilevers(Array.from(selC));
       setSelectedVanes(Array.from(selV));
       setSelectedAnchorPoints(Array.from(selAP));
@@ -858,11 +924,12 @@ export default function EditorPage() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const selT = selectedTracksRef.current;
         const selP = selectedPolesRef.current;
+        const selF = selectedFoundationsRef.current;
         const selC = selectedCantiRef.current;
         const selV = selectedVanesRef.current;
         const selAP = selectedAnchorPointsRef.current;
         const selA = selectedAnchorsRef.current;
-        if (selT.length || selP.length || selC.length || selV.length || selAP.length || selA.length) {
+        if (selT.length || selP.length || selF.length || selC.length || selV.length || selAP.length || selA.length) {
           setCompletedTracks(prev => prev.filter((_, i) => !selT.includes(i)));
           
           let newVanes = vanesRef.current;
@@ -870,9 +937,10 @@ export default function EditorPage() {
             newVanes = newVanes.filter((_, i) => !selV.includes(i));
           }
 
+          let newPoles = polesRef.current;
           if (selP.length) {
             const oldPoles = polesRef.current;
-            const newPoles = oldPoles.filter((_, i) => !selP.includes(i));
+            newPoles = oldPoles.filter((_, i) => !selP.includes(i));
             const poleIdxMap = new Array(oldPoles.length).fill(-1);
             let np = 0;
             oldPoles.forEach((_, oi) => { if (!selP.includes(oi)) poleIdxMap[oi] = np++; });
@@ -882,6 +950,25 @@ export default function EditorPage() {
             newVanes = newVanes
               .filter(v => v.poleIdx === undefined || poleIdxMap[v.poleIdx] !== -1)
               .map(v => v.poleIdx !== undefined ? { ...v, poleIdx: poleIdxMap[v.poleIdx] } : v);
+          }
+
+          if (selF.length) {
+            const oldFoundations = foundationsRef.current;
+            const newFoundations = oldFoundations.filter((_, i) => !selF.includes(i));
+            const fIdxMap = new Array(oldFoundations.length).fill(-1);
+            let nf = 0;
+            oldFoundations.forEach((_, oi) => { if (!selF.includes(oi)) fIdxMap[oi] = nf++; });
+            setFoundations(newFoundations);
+
+            // Remap poles that reference deleted foundations
+            newPoles = newPoles.map(p => {
+              if (p.foundationIdx !== undefined) {
+                const newIdx = fIdxMap[p.foundationIdx];
+                return { ...p, foundationIdx: newIdx !== -1 ? newIdx : undefined };
+              }
+              return p;
+            });
+            setPoles(newPoles);
           }
 
           if (selC.length) {
@@ -1225,6 +1312,9 @@ export default function EditorPage() {
                 {selectedPoles.length === 1 && (
                   <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '5px 8px', background: '#ef4444', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Pole</button>
                 )}
+                {selectedFoundations.length === 1 && (
+                  <button onClick={() => setEditFoundationIdx(selectedFoundations[0])} style={{ padding: '5px 8px', background: '#22c55e', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Foundation</button>
+                )}
                 {selectedAnchorPoints.length === 1 && (
                   <button onClick={() => setEditAnchorPointIdx(selectedAnchorPoints[0])} style={{ padding: '5px 8px', background: '#f97316', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Anchor Point</button>
                 )}
@@ -1253,6 +1343,7 @@ export default function EditorPage() {
               )}
             </div>
             <ToolButton icon={<CircleDot size={17} />} label="Pole" active={drawMode === 'pole'} disabled={viewMode === '3D'} onClick={() => selectDraw('pole')} />
+            <ToolButton icon={<Square size={17} />} label="Foundation" active={drawMode === 'foundation'} disabled={viewMode === '3D'} onClick={() => selectDraw('foundation')} />
             <ToolButton icon={<GitMerge size={17} />} label="Cantilever" active={drawMode === 'cantilever'} disabled={viewMode === '3D'} onClick={() => selectDraw('cantilever')} />
             <ToolButton icon={<Link2 size={17} />} label="Vane" active={drawMode === 'vane'} disabled={viewMode === '3D'} onClick={() => selectDraw('vane')} title="Connect two cantilever track-side ends" />
             <ToolButton icon={<Layout size={17} />} label="Anchor Pt" active={drawMode === 'anchorPoint'} disabled={viewMode === '3D'} onClick={() => selectDraw('anchorPoint')} title="Place anchor point plate" />
@@ -1405,6 +1496,19 @@ export default function EditorPage() {
 
         {/* ── Modals ── */}
 
+        {foundationModal && (
+          <FoundationPanel
+            foundation={foundationModal}
+            settings={projectSettings}
+            onSave={(updated) => {
+              if (!updated.label?.trim()) { alert('Label is required'); return; }
+              setFoundations(prev => { const next = [...prev, updated]; saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, anchorPointsRef.current, anchorsRef.current, next); return next; });
+              setFoundationModal(null);
+            }}
+            onClose={() => setFoundationModal(null)}
+          />
+        )}
+
         {poleModal && (
           <PolePanel
             pole={{ x: poleModal.x, z: poleModal.z, y: poleModal.y, label: '', h: projectSettings.pole.height, cantileversQuantity: 1, catSeparation: 720 }}
@@ -1504,6 +1608,20 @@ export default function EditorPage() {
               <button style={{ padding: '6px 16px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }} onClick={saveVane}>Save</button>
             </div>
           </Modal>
+        )}
+
+        {/* ── Edit: Foundation ── */}
+        {editFoundationIdx !== null && foundations[editFoundationIdx] && (
+          <FoundationPanel
+            foundation={foundations[editFoundationIdx]}
+            settings={projectSettings}
+            onSave={(updated) => {
+              if (!updated.label?.trim()) { alert('Label is required'); return; }
+              setFoundations(prev => { const n = [...prev]; n[editFoundationIdx!] = updated; saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, anchorPointsRef.current, anchorsRef.current, n); return n; });
+              setEditFoundationIdx(null); setSelectedFoundations([]);
+            }}
+            onClose={() => { setEditFoundationIdx(null); }}
+          />
         )}
 
         {/* ── Edit: Pole ── */}

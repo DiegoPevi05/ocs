@@ -133,7 +133,7 @@ export function FoundationPanel({ foundation, settings, onSave, onClose }: Props
             />
           </Field>
 
-          <Row>
+          <div style={ROW}>
             {/* Elevation */}
             <Field label="Y Elevation (mm)">
               <input type="number" value={form.y ?? 0}
@@ -145,9 +145,9 @@ export function FoundationPanel({ foundation, settings, onSave, onClose }: Props
               <input type="number" value={form.depth ?? s.foundation.depth}
                 onChange={e => set('depth', +e.target.value)} style={INPUT} />
             </Field>
-          </Row>
+          </div>
 
-          <Row>
+          <div style={ROW}>
             {/* Width */}
             <Field label="Width (mm)">
               <input type="number" value={form.width ?? s.foundation.width}
@@ -159,7 +159,7 @@ export function FoundationPanel({ foundation, settings, onSave, onClose }: Props
               <input type="number" value={form.length ?? s.foundation.length}
                 onChange={e => set('length', +e.target.value)} style={INPUT} />
             </Field>
-          </Row>
+          </div>
 
         </div>
         )}

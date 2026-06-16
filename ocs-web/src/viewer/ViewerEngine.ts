@@ -511,6 +511,18 @@ export class ViewerEngine {
       if (closestFoundation && minD < 5000) return closestFoundation;
     }
 
+    // Foundation snapping — snap to other foundation center for alignment
+    if (this.drawMode === 'foundation') {
+      const foundations = this.dynData.foundations || [];
+      let closestFoundation: THREE.Vector2 | null = null;
+      let minD = Infinity;
+      foundations.forEach((f: any) => {
+        const d = Math.hypot(wx - f.x, wz - f.z);
+        if (d < minD) { minD = d; closestFoundation = new THREE.Vector2(f.x, f.z); }
+      });
+      if (closestFoundation && minD < 2000) return closestFoundation;
+    }
+
     // Cantilever snapping
     if (this.drawMode === 'cantilever') {
       const cantPts = this.dynData.cantileverPoints || [];
@@ -622,9 +634,9 @@ export class ViewerEngine {
         yInput.value = prevY.toString();
       }
 
-      // Show/hide D input for pole mode
+      // Show/hide D input for pole and foundation mode
       const dWrap = (this as any)._dWrap as HTMLElement;
-      if (this.drawMode === 'pole') {
+      if (this.drawMode === 'pole' || this.drawMode === 'foundation') {
         dWrap.style.display = 'flex';
       } else {
         dWrap.style.display = 'none';
@@ -765,8 +777,8 @@ export class ViewerEngine {
       const snapped = this.snapToGrid(w.x, w.y);
       let finalX = snapped.x, finalZ = snapped.y;
 
-      // When placing a pole with D set, slide cursor along the D-offset curve
-      if (this.drawMode === 'pole') {
+      // When placing a pole or foundation with D set, slide cursor along the D-offset curve
+      if (this.drawMode === 'pole' || this.drawMode === 'foundation') {
         const dVal = parseFloat(((this as any)._dInput as HTMLInputElement)?.value) || 0;
         if (dVal > 0) {
           // Track whether the closest foot is on an arc and record arc center
@@ -1090,7 +1102,7 @@ export class ViewerEngine {
       const line = new THREE.Line(geo, mat);
       line.computeLineDistances();
       this.rubberbandGroup.add(line);
-    } else if (this.drawMode === 'pole') {
+    } else if (this.drawMode === 'pole' || this.drawMode === 'foundation') {
       const yVal = parseFloat(((this as any)._yInput as HTMLInputElement)?.value) || 0;
       const dVal = parseFloat(((this as any)._dInput as HTMLInputElement)?.value) || 0;
 
@@ -1146,19 +1158,19 @@ export class ViewerEngine {
       sampleTrack(this.dynData.trackPoints);
 
       // If D is set, snap cursor onto perpendicular at exactly dVal distance
-      let poleX = wx, poleZ = wz;
+      let finalX = wx, finalZ = wz;
       if (dVal > 0 && minDist < Infinity) {
         const perpX = wx - footX, perpZ = wz - footZ;
         const perpLen = Math.hypot(perpX, perpZ);
         if (perpLen > 0.1) {
-          poleX = footX + (perpX / perpLen) * dVal;
-          poleZ = footZ + (perpZ / perpLen) * dVal;
+          finalX = footX + (perpX / perpLen) * dVal;
+          finalZ = footZ + (perpZ / perpLen) * dVal;
         }
       }
 
-      // ─── Draw perpendicular dashed line foot → pole ────────────────────────
+      // ─── Draw perpendicular dashed line foot → final position ────────────────────────
       if (minDist < Infinity) {
-        const perpPts = [new THREE.Vector3(footX, yVal, footZ), new THREE.Vector3(poleX, yVal, poleZ)];
+        const perpPts = [new THREE.Vector3(footX, yVal, footZ), new THREE.Vector3(finalX, yVal, finalZ)];
         const perpGeo = new THREE.BufferGeometry().setFromPoints(perpPts);
         const perpMat = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 120, gapSize: 80 });
         const perpLine = new THREE.Line(perpGeo, perpMat);
@@ -1166,24 +1178,55 @@ export class ViewerEngine {
         this.rubberbandGroup.add(perpLine);
       }
 
-      // ─── Render hover circle (2D) ──────────────────────────────────────────
-      const cgeo = new THREE.CircleGeometry(250, 32);
-      cgeo.rotateX(-Math.PI / 2);
-      const cmat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(cgeo, cmat);
-      mesh.position.set(poleX, yVal, poleZ);
-      mesh.layers.set(1);
-      this.rubberbandGroup.add(mesh);
+      const color = this.drawMode === 'pole' ? 0xef4444 : 0x22c55e;
 
-      // ─── Render hover cylinder (3D) ────────────────────────────────────────
-      const height = 3000;
-      const cylGeo = new THREE.CylinderGeometry(150, 150, height, 16);
-      cylGeo.translate(0, height / 2, 0);
-      const cylMat = new THREE.MeshPhongMaterial({ color: 0xef4444, transparent: true, opacity: 0.5 });
-      const cyl = new THREE.Mesh(cylGeo, cylMat);
-      cyl.position.set(poleX, yVal, poleZ);
-      cyl.layers.set(2);
-      this.rubberbandGroup.add(cyl);
+      if (this.drawMode === 'pole') {
+        // ─── Render hover circle (2D) ───
+        const cgeo = new THREE.CircleGeometry(250, 32);
+        cgeo.rotateX(-Math.PI / 2);
+        const cmat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(cgeo, cmat);
+        mesh.position.set(finalX, yVal, finalZ);
+        mesh.layers.set(1);
+        this.rubberbandGroup.add(mesh);
+
+        // ─── Render hover cylinder (3D) ───
+        const height = 3000;
+        const cylGeo = new THREE.CylinderGeometry(150, 150, height, 16);
+        cylGeo.translate(0, height / 2, 0);
+        const cylMat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.5 });
+        const cyl = new THREE.Mesh(cylGeo, cylMat);
+        cyl.position.set(finalX, yVal, finalZ);
+        cyl.layers.set(2);
+        this.rubberbandGroup.add(cyl);
+      } else {
+        // ─── Render hover square (2D) ───
+        const w = 600, l = 600;
+        const rectGeo = new THREE.PlaneGeometry(w, l);
+        rectGeo.rotateX(-Math.PI / 2);
+        const rectMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(rectGeo, rectMat);
+        mesh.position.set(finalX, yVal, finalZ);
+        mesh.layers.set(1);
+        this.rubberbandGroup.add(mesh);
+
+        const dotGeo = new THREE.CircleGeometry(100, 16);
+        dotGeo.rotateX(-Math.PI / 2);
+        const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color }));
+        dot.position.set(finalX, yVal + 1, finalZ);
+        dot.layers.set(1);
+        this.rubberbandGroup.add(dot);
+
+        // ─── Render hover box (3D) ───
+        const visualHeight = 50;
+        const boxGeo = new THREE.BoxGeometry(w, visualHeight, l);
+        boxGeo.translate(0, -visualHeight / 2, 0);
+        const boxMat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.5 });
+        const box = new THREE.Mesh(boxGeo, boxMat);
+        box.position.set(finalX, yVal, -finalZ);
+        box.layers.set(2);
+        this.rubberbandGroup.add(box);
+      }
     } else if (this.drawMode === 'vane') {
       const cantilevers = this.dynData.cantilevers || [];
       const poles = this.dynData.poles || [];

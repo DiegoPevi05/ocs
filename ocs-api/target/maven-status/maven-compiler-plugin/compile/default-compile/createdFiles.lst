@@ -42,6 +42,7 @@ com/ocs/api/locations/Location$LocationBuilder.class
 com/ocs/api/auth/LoginRequest.class
 com/ocs/api/users/User$UserBuilder.class
 com/ocs/api/calculator/CalculationController.class
+com/ocs/api/shared/DevDatabaseController.class
 com/ocs/api/shared/BaseEntity.class
 com/ocs/api/vanes/Vane$VaneBuilder.class
 com/ocs/api/projects/ProjectMembershipRepository.class

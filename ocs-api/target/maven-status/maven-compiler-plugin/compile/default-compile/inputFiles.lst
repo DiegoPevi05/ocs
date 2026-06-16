@@ -23,6 +23,7 @@
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/projects/ProjectRepository.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/report/ReportService.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/shared/BaseEntity.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/shared/DevDatabaseController.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/shared/GlobalExceptionHandler.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/tracks/Track.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/tracks/TrackRepository.java

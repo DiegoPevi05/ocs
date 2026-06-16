@@ -5,6 +5,8 @@
   "scripts": {
     "setup": "node manage.js install",
     "build": "node manage.js build",
-    "dev":   "node manage.js dev"
+    "dev":   "node manage.js dev",
+    "clean": "node manage.js clean",
+    "seed":  "node manage.js seed"
   }
 }

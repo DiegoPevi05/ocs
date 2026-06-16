@@ -15,17 +15,17 @@
  */
 
 const { spawnSync, spawn } = require('child_process');
-const { existsSync }       = require('fs');
-const path                 = require('path');
-const os                   = require('os');
+const { existsSync } = require('fs');
+const path = require('path');
+const os = require('os');
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 const JAVA_HOME = '/usr/lib/jvm/java-21-openjdk-amd64';
 
-const ROOT    = __dirname;
-const CPUS    = os.cpus().length;
-const IS_WIN  = process.platform === 'win32';
+const ROOT = __dirname;
+const CPUS = os.cpus().length;
+const IS_WIN = process.platform === 'win32';
 const MVN_BIN = existsSync(path.join(ROOT, 'ocs-api', 'mvnw')) ? './mvnw' : 'mvn';
 const CALC_BIN = path.join(ROOT, 'ocs-calculator', 'build', 'catenary_server');
 
@@ -39,22 +39,22 @@ const BASE_ENV = {
 // ─── ANSI ─────────────────────────────────────────────────────────────────────
 
 const A = {
-  r:  '\x1b[0m',
-  b:  '\x1b[1m',
-  d:  '\x1b[2m',
-  red:     '\x1b[31m',
-  green:   '\x1b[32m',
-  yellow:  '\x1b[33m',
-  blue:    '\x1b[34m',
+  r: '\x1b[0m',
+  b: '\x1b[1m',
+  d: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
   magenta: '\x1b[35m',
-  cyan:    '\x1b[36m',
+  cyan: '\x1b[36m',
 };
 
-const log  = {
-  step : (msg) => console.log(`\n${A.b}${A.cyan}▸  ${msg}${A.r}`),
-  ok   : (msg) => console.log(`${A.green}${A.b}✔  ${msg}${A.r}`),
-  warn : (msg) => console.log(`${A.yellow}⚠  ${msg}${A.r}`),
-  info : (msg) => console.log(`${A.d}    ${msg}${A.r}`),
+const log = {
+  step: (msg) => console.log(`\n${A.b}${A.cyan}▸  ${msg}${A.r}`),
+  ok: (msg) => console.log(`${A.green}${A.b}✔  ${msg}${A.r}`),
+  warn: (msg) => console.log(`${A.yellow}⚠  ${msg}${A.r}`),
+  info: (msg) => console.log(`${A.d}    ${msg}${A.r}`),
   abort: (msg, code = 1) => { console.error(`\n${A.red}${A.b}✖  ${msg}${A.r}\n`); process.exit(code); },
 };
 
@@ -75,7 +75,7 @@ function run(cmd, args = [], cwd = ROOT) {
 function ensureCmakeConfigured() {
   const buildDir = path.join(ROOT, 'ocs-calculator', 'build');
   if (existsSync(path.join(buildDir, 'Makefile')) ||
-      existsSync(path.join(buildDir, 'build.ninja'))) return;
+    existsSync(path.join(buildDir, 'build.ninja'))) return;
 
   log.warn('cmake not yet configured — running cmake …');
   const rc = run('cmake', [
@@ -189,40 +189,40 @@ function cmdDev() {
 
   const SERVICES = [
     {
-      name:  'calculator',
+      name: 'calculator',
       color: A.cyan,
-      cmd:   CALC_BIN,
-      args:  [],
-      cwd:   path.join(ROOT, 'ocs-calculator', 'build'),
+      cmd: CALC_BIN,
+      args: [],
+      cwd: path.join(ROOT, 'ocs-calculator', 'build'),
       shell: false,
     },
     {
-      name:  'api',
+      name: 'api',
       color: A.green,
-      cmd:   MVN_BIN,
-      args:  ['spring-boot:run'],
-      cwd:   path.join(ROOT, 'ocs-api'),
+      cmd: MVN_BIN,
+      args: ['spring-boot:run'],
+      cwd: path.join(ROOT, 'ocs-api'),
       shell: IS_WIN,
     },
     {
-      name:  'web',
+      name: 'web',
       color: A.magenta,
-      cmd:   'npm',
-      args:  ['run', 'dev'],
-      cwd:   path.join(ROOT, 'ocs-web'),
+      cmd: 'npm',
+      args: ['run', 'dev'],
+      cwd: path.join(ROOT, 'ocs-web'),
       shell: IS_WIN,
     },
   ];
 
-  const PAD   = Math.max(...SERVICES.map(s => s.name.length));
-  const pfx   = (svc) => `${svc.color}${A.b}[${svc.name.padEnd(PAD)}]${A.r} `;
+  const PAD = Math.max(...SERVICES.map(s => s.name.length));
+  const pfx = (svc) => `${svc.color}${A.b}[${svc.name.padEnd(PAD)}]${A.r} `;
   const procs = [];
   let exiting = false;
 
   function killAll() {
     if (exiting) return;
     exiting = true;
-    procs.forEach(p => { try { p.kill('SIGTERM'); } catch (_) {} });
+    procs.forEach(p => { try { p.kill('SIGTERM'); } catch (_) { } });
   }
 
   console.log(`\n${A.b}Starting OCS dev environment${A.r}`);
@@ -235,10 +235,10 @@ function cmdDev() {
 
   for (const svc of SERVICES) {
     const proc = spawn(svc.cmd, svc.args, {
-      cwd:   svc.cwd,
+      cwd: svc.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: svc.shell,
-      env:   BASE_ENV,
+      env: BASE_ENV,
     });
 
     procs.push(proc);
@@ -282,18 +282,52 @@ function cmdDev() {
     console.log(`\n${A.yellow}${A.b}Stopping all services…${A.r}`);
     killAll();
     setTimeout(() => {
-      procs.forEach(p => { try { p.kill('SIGKILL'); } catch (_) {} });
+      procs.forEach(p => { try { p.kill('SIGKILL'); } catch (_) { } });
       process.exit(0);
     }, 3000).unref();
   }
 
-  process.on('SIGINT',  onShutdown);
+  process.on('SIGINT', onShutdown);
   process.on('SIGTERM', onShutdown);
+}
+
+/**
+ * clean — reset the drawing database (tracks, poles, cantis, vanes).
+ */
+function cmdClean() {
+  log.step('Cleaning drawing database …');
+  log.warn('This will TRUNCATE tracks, poles, cantilevers and vanes.');
+
+  // Try to call the API endpoint. We assume it's on 8080.
+  // We use curl since it's common on Linux and easy to call via run().
+  const rc = run('curl', ['-X', 'POST', 'http://localhost:8081/api/dev/db/clean']);
+
+  if (rc !== 0) {
+    console.log(`\n${A.yellow}Hint: Make sure ocs-api is running on port 8080 before calling clean.${A.r}\n`);
+    log.abort('Clean request failed.');
+  }
+
+  log.ok('Database cleaned successfully.');
+}
+
+/**
+ * seed — trigger the seed endpoint.
+ */
+function cmdSeed() {
+  log.step('Seeding database …');
+  const rc = run('curl', ['-X', 'POST', 'http://localhost:8080/api/dev/db/seed']);
+
+  if (rc !== 0) {
+    console.log(`\n${A.yellow}Hint: Make sure ocs-api is running on port 8080 before calling seed.${A.r}\n`);
+    log.abort('Seed request failed.');
+  }
+
+  log.ok('Database seeded successfully.');
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
-const COMMANDS = { install: cmdInstall, build: cmdBuild, dev: cmdDev };
+const COMMANDS = { install: cmdInstall, build: cmdBuild, dev: cmdDev, clean: cmdClean, seed: cmdSeed };
 
 const cmd = process.argv[2];
 

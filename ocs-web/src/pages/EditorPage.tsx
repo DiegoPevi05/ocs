@@ -241,6 +241,8 @@ export default function EditorPage() {
   useEffect(() => { selectedPolesRef.current = selectedPoles; }, [selectedPoles]);
   const selectedFoundationsRef = useRef(selectedFoundations);
   useEffect(() => { selectedFoundationsRef.current = selectedFoundations; }, [selectedFoundations]);
+  const selectedCantiRef = useRef(selectedCantilevers);
+  useEffect(() => { selectedCantiRef.current = selectedCantilevers; }, [selectedCantilevers]);
   const selectedVanesRef = useRef(selectedVanes);
   useEffect(() => { selectedVanesRef.current = selectedVanes; }, [selectedVanes]);
   const vaneFirstCantIdxRef = useRef(vaneFirstCantIdx);
@@ -989,6 +991,8 @@ export default function EditorPage() {
           }
 
           setVanes(newVanes);
+          let finalAnchorPoints = anchorPointsRef.current;
+          let finalAnchors = anchorsRef.current;
           if (selAP.length) {
             // Remove anchors that reference deleted anchor points, remap indices
             const oldAPs = anchorPointsRef.current;
@@ -997,20 +1001,33 @@ export default function EditorPage() {
             let nap = 0;
             oldAPs.forEach((_, oi) => { if (!selAP.includes(oi)) apIdxMap[oi] = nap++; });
             setAnchorPoints(newAPs);
-            setAnchors(prev => prev
+            finalAnchorPoints = newAPs;
+            finalAnchors = finalAnchors
               .filter(a => apIdxMap[a.anchorPointIdx] !== -1)
-              .map(a => ({ ...a, anchorPointIdx: apIdxMap[a.anchorPointIdx] }))
-            );
-          } else {
-            setAnchors(prev => prev.filter((_, i) => !selA.includes(i)));
+              .map(a => ({ ...a, anchorPointIdx: apIdxMap[a.anchorPointIdx] }));
+            setAnchors(finalAnchors);
+          } else if (selA.length) {
+            finalAnchors = finalAnchors.filter((_, i) => !selA.includes(i));
+            setAnchors(finalAnchors);
           }
-          setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
+          
+          saveScene(
+            completedTracksRef.current.filter((_, i) => !selT.includes(i)),
+            newPoles,
+            cantileversRef.current.filter((_, i) => !selC.includes(i)),
+            newVanes,
+            finalAnchorPoints,
+            finalAnchors,
+            foundationsRef.current.filter((_, i) => !selF.includes(i))
+          );
+
+          setSelectedTracks([]); setSelectedPoles([]); setSelectedFoundations([]); setSelectedCantilevers([]); setSelectedVanes([]);
           setSelectedAnchorPoints([]); setSelectedAnchors([]);
         }
       } else if (e.key === 'Escape') {
         setTrackPoints([]); setVaneFirstCantIdx(null); setAnchorFirstPoleIdx(null);
         if (drawMode !== 'none') { setDrawMode('none'); engineRef.current?.setDrawMode('none'); }
-        setSelectedTracks([]); setSelectedPoles([]); setSelectedCantilevers([]); setSelectedVanes([]);
+        setSelectedTracks([]); setSelectedPoles([]); setSelectedFoundations([]); setSelectedCantilevers([]); setSelectedVanes([]);
         setSelectedAnchorPoints([]); setSelectedAnchors([]);
       }
     };

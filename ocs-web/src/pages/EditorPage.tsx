@@ -12,6 +12,7 @@ import { CantileverPanel } from '../components/CantileverPanel';
 import { VanePanel } from '../components/VanePanel';
 import { PolePanel } from '../components/PolePanel';
 import { FoundationPanel } from '../components/FoundationPanel';
+import { TrackPanel } from '../components/TrackPanel';
 import { AnchorPointPanel } from '../components/AnchorPointPanel';
 import { AnchorPanel } from '../components/AnchorPanel';
 import type { DrawMode, ViewMode, SceneData, Location, TrackData, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
@@ -19,14 +20,14 @@ import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-interface TrackFoot { x: number; z: number; tx: number; tz: number; }
+interface TrackFoot { x: number; z: number; y: number; tx: number; tz: number; }
 
-/** Closest XZ point on polyline + track segment direction. */
+/** Closest XZ point on polyline + track segment direction and elevation. */
 function closestPointOnTracks(
   tracks: { x: number; z: number; y?: number; r?: number; label?: string }[][],
   px: number, pz: number
 ): TrackFoot {
-  let footX = px, footZ = pz, minDist = Infinity, tx = 1, tz = 0;
+  let footX = px, footZ = pz, footY = 0, minDist = Infinity, tx = 1, tz = 0;
 
   tracks.forEach(tr => {
     for (let i = 1; i < tr.length; i++) {
@@ -55,6 +56,10 @@ function closestPointOnTracks(
               const tDirZ = Math.cos(a) * (curr.r < 0 ? -1 : 1);
               const tLen = Math.hypot(tDirX, tDirZ);
               tx = tLen > 0 ? tDirX / tLen : 1; tz = tLen > 0 ? tDirZ / tLen : 0;
+              
+              // Linear interpolation of height Y
+              const progress = s / 64;
+              footY = (prev.y ?? 0) + ((curr.y ?? 0) - (prev.y ?? 0)) * progress;
             }
           }
           continue;
@@ -70,11 +75,14 @@ function closestPointOnTracks(
         minDist = d; footX = qx; footZ = qz;
         const len = Math.sqrt(len2);
         tx = len > 0 ? dx / len : 1; tz = len > 0 ? dz / len : 0;
+        
+        // Linear interpolation of height Y
+        footY = (prev.y ?? 0) + ((curr.y ?? 0) - (prev.y ?? 0)) * t;
       }
     }
   });
 
-  return { x: footX, z: footZ, tx, tz };
+  return { x: footX, z: footZ, y: footY, tx, tz };
 }
 
 // ─── Input field helper ────────────────────────────────────────────────────────
@@ -182,6 +190,7 @@ export default function EditorPage() {
   const [editAnchorIdx, setEditAnchorIdx] = useState<number | null>(null);
 
   // Edit modals
+  const [editTrackIdx, setEditTrackIdx] = useState<number | null>(null);
   const [editPoleIdx, setEditPoleIdx] = useState<number | null>(null);
   const [editFoundationIdx, setEditFoundationIdx] = useState<number | null>(null);
   const [editCantileverIdx, setEditCantileverIdx] = useState<number | null>(null);
@@ -508,11 +517,19 @@ export default function EditorPage() {
           }
           return Math.hypot(pX - c.x1, pZ - c.z1) < 500;
         });
+
+        const pY = (matchPole?.foundationIdx !== undefined && foundationsRef.current[matchPole.foundationIdx])
+          ? (foundationsRef.current[matchPole.foundationIdx].y ?? 0)
+          : (matchPole?.y ?? 0);
+
+        const foot = closestPointOnTracks(completedTracksRef.current, footX, footZ);
+        const footY = foot.y;
+
         return {
           configuration: c.configuration ?? 'TDP>2.2',
           contactWireConfiguration: c.contactWireConfiguration ?? projectWireConfig,
-          polePosition: [c.x1, 0, -c.z1],
-          pv: [footX, 0, -footZ],
+          polePosition: [c.x1, pY, -c.z1],
+          pv: [footX, footY, -footZ],
           contactWireHeight: c.contactWireHeight ?? 5400,
           systemHeight: c.systemHeight ?? 1000,
           contactWireVerticalOffset: c.contactWireVerticalOffset ?? 120,
@@ -554,19 +571,25 @@ export default function EditorPage() {
       const sysH2 = c2 ? (c2.systemHeight ?? 1000) : (v.poleSystemHeight ?? 1000);
       const cwo2 = c2 ? (c2.contactWireVerticalOffset ?? 120) : 0; // offset is usually 0 if attached directly to pole face
 
+      const foot1 = closestPointOnTracks(completedTracksRef.current, c1.x2, c1.z2);
+      const y1 = foot1.y;
+
       // If attached to a pole, recalculate attachment point based on latest pole coordinate
       let endX = v.x2;
       let endZ = v.z2;
+      let endY = 0;
       if (v.poleIdx !== undefined && polesRef.current[v.poleIdx]) {
         const p = polesRef.current[v.poleIdx];
         
         // Check if pole is linked to a foundation, if so use foundation coordinates
         let pX = p.x;
         let pZ = p.z || 0;
+        let pY = p.y ?? 0;
         if (p.foundationIdx !== undefined && foundationsRef.current[p.foundationIdx]) {
             const f = foundationsRef.current[p.foundationIdx];
             pX = f.x;
             pZ = f.z;
+            pY = f.y ?? 0;
         }
 
         const foot = closestPointOnTracks(completedTracksRef.current, pX, pZ);
@@ -577,15 +600,19 @@ export default function EditorPage() {
         const offset = (p.width || 300) / 2;
         endX = pX + sign * foot.tx * offset;
         endZ = pZ + sign * foot.tz * offset;
+        endY = pY; // Foundation top / pole base
+      } else if (c2) {
+          const foot2 = closestPointOnTracks(completedTracksRef.current, c2.x2, c2.z2);
+          endY = foot2.y;
       }
 
       // cwAxis.y = contactWireHeight + contactWireVerticalOffset (invert(viaDir) = up)
       const payload = {
         _vaneIdx: startIndex + vIdx,
-        cw_start: [c1.x2, cwH1 + cwo1, -c1.z2],
-        sw_start: [c1.x2, cwH1 + cwo1 + sysH1, -c1.z2],
-        cw_end: [endX, cwH2 + cwo2, -endZ],
-        sw_end: [endX, cwH2 + cwo2 + sysH2, -endZ],
+        cw_start: [c1.x2, y1 + cwH1 + cwo1, -c1.z2],
+        sw_start: [c1.x2, y1 + cwH1 + cwo1 + sysH1, -c1.z2],
+        cw_end: [endX, endY + cwH2 + cwo2, -endZ],
+        sw_end: [endX, endY + cwH2 + cwo2 + sysH2, -endZ],
         qty_droppers: v.qtyDroppers ?? 0,
         initial_separation: v.initialSeparation ?? 5000,
         step_size: 500,  // fixed 500mm rendering grid for smooth wire curves
@@ -604,6 +631,64 @@ export default function EditorPage() {
   useEffect(() => {
     if (vanes.length > 0) triggerVaneCalculation(vanes, cantilevers);
   }, [cantilevers, vanes, triggerVaneCalculation]);
+
+  const handleTrackSave = (updated: TrackData) => {
+    if (editTrackIdx === null) return;
+    const newTracks = [...completedTracks];
+    newTracks[editTrackIdx] = updated.points.map(p => ({ ...p, label: updated.label }));
+    setCompletedTracks(newTracks);
+    setEditTrackIdx(null);
+
+    // Regression: Recalculate foot for all cantilevers based on updated tracks
+    const updatedCants = cantilevers.map(c => {
+      const foot = closestPointOnTracks(newTracks, c.x2raw ?? c.x2, c.z2raw ?? c.z2);
+      return { ...c, x2: foot.x, z2: foot.z, tx: foot.tx, tz: foot.tz };
+    });
+    setCantilevers(updatedCants);
+
+    saveScene(newTracks, poles, updatedCants);
+  };
+
+  const handleFoundationSave = (updated: FoundationData) => {
+    if (editFoundationIdx === null) return;
+    const nextFoundations = [...foundations];
+    nextFoundations[editFoundationIdx] = updated;
+    setFoundations(nextFoundations);
+    setEditFoundationIdx(null);
+
+    // Regression: Poles linked to this foundation should trigger cantilever recalculation
+    // (Actual calculation happens via the triggerCalculation effect which depends on cantilevers)
+    // We don't necessarily need to change CantileverData unless pole X/Z changed,
+    // but foundation Y change should trigger a re-calc. 
+    // Since cantilevers state won't change if only foundation Y changed, we might need to force it.
+    triggerCalculation(cantilevers);
+
+    saveScene(completedTracks, poles, cantilevers, vanes, anchorPoints, anchors, nextFoundations);
+  };
+
+  const handlePoleSave = (updated: PoleData) => {
+    if (editPoleIdx === null) return;
+    const nextPoles = [...poles];
+    nextPoles[editPoleIdx] = updated;
+    setPoles(nextPoles);
+    setEditPoleIdx(null);
+
+    // If pole moved, update attached cantilevers
+    const oldP = poles[editPoleIdx];
+    if (oldP.x !== updated.x || oldP.z !== updated.z || oldP.y !== updated.y) {
+      const nextCants = cantilevers.map(c => {
+        if (Math.hypot(c.x1 - oldP.x, c.z1 - (oldP.z || 0)) < 10) {
+          return { ...c, x1: updated.x, z1: updated.z || 0 };
+        }
+        return c;
+      });
+      setCantilevers(nextCants);
+      saveScene(completedTracks, nextPoles, nextCants);
+    } else {
+      saveScene(completedTracks, nextPoles);
+      triggerCalculation(cantilevers); // Re-calc in case params like width/length changed
+    }
+  };
 
   // Save to API
   const saveScene = useCallback(async (
@@ -1332,6 +1417,9 @@ export default function EditorPage() {
                 {selectedFoundations.length === 1 && (
                   <button onClick={() => setEditFoundationIdx(selectedFoundations[0])} style={{ padding: '5px 8px', background: '#22c55e', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Foundation</button>
                 )}
+                {selectedTracks.length === 1 && (
+                  <button onClick={() => setEditTrackIdx(selectedTracks[0])} style={{ padding: '5px 8px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Track</button>
+                )}
                 {selectedAnchorPoints.length === 1 && (
                   <button onClick={() => setEditAnchorPointIdx(selectedAnchorPoints[0])} style={{ padding: '5px 8px', background: '#f97316', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Anchor Point</button>
                 )}
@@ -1627,17 +1715,22 @@ export default function EditorPage() {
           </Modal>
         )}
 
+        {/* ── Edit: Track ── */}
+        {editTrackIdx !== null && completedTracks[editTrackIdx] && (
+          <TrackPanel
+            track={{ label: completedTracks[editTrackIdx][0]?.label ?? '', points: completedTracks[editTrackIdx] }}
+            onSave={handleTrackSave}
+            onClose={() => setEditTrackIdx(null)}
+          />
+        )}
+
         {/* ── Edit: Foundation ── */}
         {editFoundationIdx !== null && foundations[editFoundationIdx] && (
           <FoundationPanel
             foundation={foundations[editFoundationIdx]}
             settings={projectSettings}
-            onSave={(updated) => {
-              if (!updated.label?.trim()) { alert('Label is required'); return; }
-              setFoundations(prev => { const n = [...prev]; n[editFoundationIdx!] = updated; saveScene(completedTracksRef.current, polesRef.current, cantileversRef.current, vanesRef.current, anchorPointsRef.current, anchorsRef.current, n); return n; });
-              setEditFoundationIdx(null); setSelectedFoundations([]);
-            }}
-            onClose={() => { setEditFoundationIdx(null); }}
+            onSave={handleFoundationSave}
+            onClose={() => setEditFoundationIdx(null)}
           />
         )}
 
@@ -1646,12 +1739,8 @@ export default function EditorPage() {
           <PolePanel
             pole={poles[editPoleIdx]}
             settings={projectSettings}
-            onSave={(updated) => {
-              if (!updated.label?.trim()) { alert('Label is required'); return; }
-              setPoles(prev => { const n = [...prev]; n[editPoleIdx!] = updated; saveScene(completedTracksRef.current, n); return n; });
-              setEditPoleIdx(null); setSelectedPoles([]);
-            }}
-            onClose={() => { setEditPoleIdx(null); }}
+            onSave={handlePoleSave}
+            onClose={() => setEditPoleIdx(null)}
           />
         )}
 

@@ -41,6 +41,7 @@ services:
 
   # ── C++ Calculator engine ─────────────────────────────────────────────────────
   ocs-calculator:
+    image: ocs-calculator:latest
     build:
       context: ./ocs-calculator
       dockerfile: Dockerfile
@@ -58,6 +59,7 @@ services:
 
   # ── Spring Boot API ───────────────────────────────────────────────────────────
   ocs-api:
+    image: ocs-api:latest
     build:
       context: ./ocs-api
       dockerfile: Dockerfile
@@ -76,10 +78,11 @@ services:
       postgres:
         condition: service_healthy
       ocs-calculator:
-        condition: service_started
+        condition: service_healthy
 
   # ── React + Three.js Frontend ─────────────────────────────────────────────────
   ocs-web:
+    image: ocs-web:latest
     build:
       context: ./ocs-web
       dockerfile: Dockerfile

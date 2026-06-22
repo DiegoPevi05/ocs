@@ -18,19 +18,22 @@ void Pole3D::calculateGeometries(const math::Vec3& globalPv) {
     if (pov == components::Pov::GLOBAL) {
         // Input z is already negated by the frontend (z_scene = -z_editor),
         // so use it directly without further negation.
-        polePosition = { globalPosition.x, 0, globalPosition.z };
+        // y is preserved so poles sitting on an elevated track segment keep
+        // their correct base elevation instead of collapsing to y=0.
+        polePosition = { globalPosition.x, globalPosition.y, globalPosition.z };
     } else {
-        polePosition = { 0, 0, globalPosition.z };
+        polePosition = { 0, globalPosition.y, globalPosition.z };
     }
 }
 
 math::Vec3 Pole3D::getAdjustedPv(const math::Vec3& globalPv) const {
     if (pov == components::Pov::GLOBAL) {
         // Input z is already negated by the frontend (z_scene = -z_editor).
-        return { globalPv.x, 0, globalPv.z };
+        // y carries the track elevation at this PV and must be kept.
+        return { globalPv.x, globalPv.y, globalPv.z };
     } else {
         double pvL = math::distanceBetween({globalPosition.x, globalPosition.y, globalPosition.z}, globalPv);
-        return { pvL, 0, 0 };
+        return { pvL, globalPv.y, 0 };
     }
 }
 
@@ -54,9 +57,9 @@ math::Vec3 Pole3D::getUpperFixedPoint(const math::Vec3& bottomFixedPoint, double
 }
 
 std::vector<viewer::Line3D> Pole3D::getRenderLines() const {
-    // Generate a simple mast visualization spanning from 0 to 12000 height mm
-    math::Vec3 base = { polePosition.x, 0.0, polePosition.z };
-    math::Vec3 top = { polePosition.x, 12000.0, polePosition.z };
+    // Generate a simple mast visualization spanning 12000mm above the pole base elevation
+    math::Vec3 base = { polePosition.x, polePosition.y, polePosition.z };
+    math::Vec3 top = { polePosition.x, polePosition.y + 12000.0, polePosition.z };
     // Gray color for Pole
     return { viewer::Line3D("Pole", base, top, 100, 100, 100, 255) };
 }

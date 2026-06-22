@@ -603,6 +603,8 @@ export default function EditorPage() {
         endY = pY; // Foundation top / pole base
       } else if (c2) {
           const foot2 = closestPointOnTracks(completedTracksRef.current, c2.x2, c2.z2);
+          endX = c2.x2;
+          endZ = c2.z2;
           endY = foot2.y;
       }
 
@@ -656,14 +658,24 @@ export default function EditorPage() {
     setFoundations(nextFoundations);
     setEditFoundationIdx(null);
 
+    // Poles linked to this foundation inherit its position/elevation directly,
+    // so persist that onto the pole records (not just at render time) to keep
+    // the pole panel and saved scene consistent with the foundation.
+    const nextPoles = poles.map(p =>
+      p.foundationIdx === editFoundationIdx
+        ? { ...p, x: updated.x, z: updated.z, y: updated.y }
+        : p
+    );
+    setPoles(nextPoles);
+
     // Regression: Poles linked to this foundation should trigger cantilever recalculation
     // (Actual calculation happens via the triggerCalculation effect which depends on cantilevers)
     // We don't necessarily need to change CantileverData unless pole X/Z changed,
-    // but foundation Y change should trigger a re-calc. 
+    // but foundation Y change should trigger a re-calc.
     // Since cantilevers state won't change if only foundation Y changed, we might need to force it.
     triggerCalculation(cantilevers);
 
-    saveScene(completedTracks, poles, cantilevers, vanes, anchorPoints, anchors, nextFoundations);
+    saveScene(completedTracks, nextPoles, cantilevers, vanes, anchorPoints, anchors, nextFoundations);
   };
 
   const handlePoleSave = (updated: PoleData) => {
@@ -673,8 +685,18 @@ export default function EditorPage() {
     setPoles(nextPoles);
     setEditPoleIdx(null);
 
-    // If pole moved, update attached cantilevers
+    // If this pole is linked to a foundation and its elevation changed, push that
+    // elevation back onto the foundation so both stay in sync either direction.
     const oldP = poles[editPoleIdx];
+    let nextFoundations = foundations;
+    if (updated.foundationIdx !== undefined && foundations[updated.foundationIdx] &&
+        (foundations[updated.foundationIdx].y ?? 0) !== (updated.y ?? 0)) {
+      nextFoundations = [...foundations];
+      nextFoundations[updated.foundationIdx] = { ...nextFoundations[updated.foundationIdx], y: updated.y };
+      setFoundations(nextFoundations);
+    }
+
+    // If pole moved, update attached cantilevers
     if (oldP.x !== updated.x || oldP.z !== updated.z || oldP.y !== updated.y) {
       const nextCants = cantilevers.map(c => {
         if (Math.hypot(c.x1 - oldP.x, c.z1 - (oldP.z || 0)) < 10) {
@@ -683,9 +705,9 @@ export default function EditorPage() {
         return c;
       });
       setCantilevers(nextCants);
-      saveScene(completedTracks, nextPoles, nextCants);
+      saveScene(completedTracks, nextPoles, nextCants, vanes, anchorPoints, anchors, nextFoundations);
     } else {
-      saveScene(completedTracks, nextPoles);
+      saveScene(completedTracks, nextPoles, cantilevers, vanes, anchorPoints, anchors, nextFoundations);
       triggerCalculation(cantilevers); // Re-calc in case params like width/length changed
     }
   };

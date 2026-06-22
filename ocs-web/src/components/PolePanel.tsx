@@ -202,9 +202,8 @@ export function PolePanel({ pole, settings, onSave, onClose }: Props) {
 
           <Row>
             {/* Elevation */}
-            <Field label="Y Elevation (mm)" hint={form.foundationIdx !== undefined ? "Inherited from foundation." : "Vertical offset from base track level."}>
+            <Field label="Y Elevation (mm)" hint={form.foundationIdx !== undefined ? "Linked to foundation — editing this also updates the foundation's elevation." : "Vertical offset from base track level."}>
               <input type="number" value={form.y ?? 0}
-                disabled={form.foundationIdx !== undefined}
                 onChange={e => set('y', +e.target.value)} style={INPUT} />
             </Field>
 

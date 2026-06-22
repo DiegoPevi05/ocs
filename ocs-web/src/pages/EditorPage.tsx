@@ -392,6 +392,7 @@ export default function EditorPage() {
                     lines: [...(bp.lines ?? []), ...(bc.lines ?? [])],
                     results: bc.results ?? [],
                     vanes: existing?.vanes ?? [],
+                    cwAxis: bc.cwAxis, mwAxis: bc.mwAxis,
                   });
                 }
               }
@@ -574,13 +575,21 @@ export default function EditorPage() {
       const foot1 = closestPointOnTracks(completedTracksRef.current, c1.x2, c1.z2);
       const y1 = foot1.y;
 
+      // Prefer the calculator's actual solved attachment point (cwAxis/mwAxis) over
+      // a flat approximation — once the pole and the track foot sit at different
+      // elevations (climbing/descending track, common on curves), the real
+      // attachment point tilts off-axis and the flat guess visibly disconnects
+      // from the cantilever hardware.
+      const c1Calc = calcByCantiIdx.current.get(v.cantileverIdx1);
+      const cw_start = c1Calc?.cwAxis ?? [c1.x2, y1 + cwH1 + cwo1, -c1.z2];
+      const sw_start = c1Calc?.mwAxis ?? [c1.x2, y1 + cwH1 + cwo1 + sysH1, -c1.z2];
+
       // If attached to a pole, recalculate attachment point based on latest pole coordinate
-      let endX = v.x2;
-      let endZ = v.z2;
-      let endY = 0;
+      let cw_end: [number, number, number];
+      let sw_end: [number, number, number];
       if (v.poleIdx !== undefined && polesRef.current[v.poleIdx]) {
         const p = polesRef.current[v.poleIdx];
-        
+
         // Check if pole is linked to a foundation, if so use foundation coordinates
         let pX = p.x;
         let pZ = p.z || 0;
@@ -598,23 +607,23 @@ export default function EditorPage() {
         const dot = vToC1x * foot.tx + vToC1z * foot.tz;
         const sign = dot >= 0 ? 1 : -1;
         const offset = (p.width || 300) / 2;
-        endX = pX + sign * foot.tx * offset;
-        endZ = pZ + sign * foot.tz * offset;
-        endY = pY; // Foundation top / pole base
+        const endX = pX + sign * foot.tx * offset;
+        const endZ = pZ + sign * foot.tz * offset;
+        const endY = pY; // Foundation top / pole base
+        cw_end = [endX, endY + cwH2 + cwo2, -endZ];
+        sw_end = [endX, endY + cwH2 + cwo2 + sysH2, -endZ];
       } else if (c2) {
           const foot2 = closestPointOnTracks(completedTracksRef.current, c2.x2, c2.z2);
-          endX = c2.x2;
-          endZ = c2.z2;
-          endY = foot2.y;
+          const c2Calc = calcByCantiIdx.current.get(v.cantileverIdx2!);
+          cw_end = c2Calc?.cwAxis ?? [c2.x2, foot2.y + cwH2 + cwo2, -c2.z2];
+          sw_end = c2Calc?.mwAxis ?? [c2.x2, foot2.y + cwH2 + cwo2 + sysH2, -c2.z2];
+      } else {
+        return;
       }
 
-      // cwAxis.y = contactWireHeight + contactWireVerticalOffset (invert(viaDir) = up)
       const payload = {
         _vaneIdx: startIndex + vIdx,
-        cw_start: [c1.x2, y1 + cwH1 + cwo1, -c1.z2],
-        sw_start: [c1.x2, y1 + cwH1 + cwo1 + sysH1, -c1.z2],
-        cw_end: [endX, endY + cwH2 + cwo2, -endZ],
-        sw_end: [endX, endY + cwH2 + cwo2 + sysH2, -endZ],
+        cw_start, sw_start, cw_end, sw_end,
         qty_droppers: v.qtyDroppers ?? 0,
         initial_separation: v.initialSeparation ?? 5000,
         step_size: 500,  // fixed 500mm rendering grid for smooth wire curves

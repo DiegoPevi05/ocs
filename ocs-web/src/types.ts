@@ -22,6 +22,8 @@ export interface ApiCantilever {
   index: number;
   lines: ApiLine[];
   results: ApiResult[];
+  cwAxis?: [number, number, number]; // real contact-wire attachment point (scene coords, Z already negated)
+  mwAxis?: [number, number, number]; // real messenger/support-wire attachment point
 }
 
 export interface ApiPole {
@@ -157,6 +159,8 @@ export interface CalcCantileverEntry {
   lines: ApiLine[];
   results: ApiResult[];
   vanes: CalcVaneEntry[];
+  cwAxis?: [number, number, number];
+  mwAxis?: [number, number, number];
 }
 
 export interface CalcPoleEntry {

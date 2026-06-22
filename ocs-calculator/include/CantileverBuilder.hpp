@@ -46,6 +46,12 @@ public:
     
     std::vector<viewer::Line3D> getPoleLines() const;
     std::vector<viewer::Line3D> getAssemblyLines() const;
+
+    // Real contact-wire / messenger-wire attachment points, as actually placed
+    // by the geometry solver (accounts for track/pole elevation mismatch and
+    // superelevation tilt) — callers should use these instead of approximating.
+    math::Vec3 getCwAxis() const;
+    math::Vec3 getMwAxis() const;
 };
 
 } // namespace catenary

@@ -78,4 +78,14 @@ std::vector<viewer::Line3D> CantileverBuilder::getAssemblyLines() const {
     return allLines;
 }
 
+math::Vec3 CantileverBuilder::getCwAxis() const {
+    if (frame) return frame->cwAxis;
+    return {0, 0, 0};
+}
+
+math::Vec3 CantileverBuilder::getMwAxis() const {
+    if (frame) return frame->mwAxis;
+    return {0, 0, 0};
+}
+
 } // namespace catenary

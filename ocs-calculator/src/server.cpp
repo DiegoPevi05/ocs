@@ -204,6 +204,10 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
         json cLines = json::array();
         for (const auto& line : builder->getAssemblyLines()) cLines.push_back(line3dToJson(line));
         cObj["lines"] = cLines;
+        // Real attachment points (post tilt/elevation solve) — consumers (e.g. vane
+        // wiring) should anchor to these instead of re-deriving an approximation.
+        cObj["cwAxis"] = vec3ToJson(builder->getCwAxis());
+        cObj["mwAxis"] = vec3ToJson(builder->getMwAxis());
         cantileversJson.push_back(cObj);
     }
     

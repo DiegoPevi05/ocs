@@ -47,6 +47,14 @@ void CantileverFrame::calculateGeometry() {
     double ratio = u / (track.gauge + track.skate.hw);
     trackInclination = std::asin(ratio);
 
+    // Horizontal track-tangent direction (XZ only, Y=0).
+    // directionPv may carry a tiny Y from floating-point or inclined surfaces;
+    // zero it out and renormalize before crossing to guarantee a purely horizontal result.
+    {
+        math::Vec3 dvXZ = math::normalize({ directionPv.x, 0.0, directionPv.z });
+        trackTangentDir = math::normalize(math::cross({0.0, 1.0, 0.0}, dvXZ));
+    }
+
     // Update via direction based on track inclination and curve direction
     double cosAlpha = std::cos(trackInclination);
     double sinAlpha = std::sin(trackInclination);

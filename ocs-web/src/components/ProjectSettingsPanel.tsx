@@ -20,10 +20,10 @@ const LABEL: CSSProperties = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <label style={LABEL}>{label}</label>
+      <label style={LABEL} title={hint}>{label}</label>
       {children}
     </div>
   );

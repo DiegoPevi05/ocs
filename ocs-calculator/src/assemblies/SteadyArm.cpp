@@ -14,6 +14,8 @@ SteadyArm::SteadyArm(const SteadyArmParams& params,
 void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
     config = frame.model.type.configuration;
     contactWireConfig = frame.model.type.contactWireConfiguration;
+    // Store the frame's track-tangent for use in getRenderLines
+    trackTangentDir = frame.trackTangentDir;
     wireSupportStainlessSteelPoint = bracketTube->stayTube->wireSupportStainlessSteelPoint;
 
     double angle = math::degreesToRadians(params.alpha);
@@ -37,12 +39,13 @@ void SteadyArm::calculateGeometry(const CantileverFrame& frame) {
                 points.push_back(math::subtract(frame.cwAxis, math::scale(perpK, bracketTube->params.eye_clamp.h)));
             }
         } else if (params.swivel_clip && registerArm) {
-            double angleDeg = params.alpha - params.swivel_clip->C;
-            if (components::isTdpGt2_2(config)) angleDeg = 180.0 - (params.alpha + params.swivel_clip->C);
-            math::Vec3 CwXYDir = { frame.directionPv.x * std::cos(math::degreesToRadians(angleDeg)), std::sin(math::degreesToRadians(angleDeg)), frame.directionPv.z * std::cos(math::degreesToRadians(angleDeg)) };
-            math::Vec3 v1 = math::add(frame.cwAxis, math::scale(CwXYDir, registerArm->params.drop_bracket.double_wire_separation_x / 2.0));
+            // Separate the two CW points along the track-tangent direction (XZ only, Y=0).
+            // frame.trackTangentDir = cross(Y_up, XZ-normalized directionPv) — computed once
+            // in CantileverFrame from the horizontal projection of the pole→foot direction.
+            // This correctly handles straight lines and polyline curves without elevation.
+            math::Vec3 v1 = math::add(frame.cwAxis, math::scale(frame.trackTangentDir, registerArm->params.drop_bracket.double_wire_separation_x / 2.0));
             points.push_back(math::add(v1, math::scale(perpK, registerArm->params.drop_bracket.double_wire_separation_z / 2.0)));
-            math::Vec3 v2 = math::subtract(frame.cwAxis, math::scale(CwXYDir, registerArm->params.drop_bracket.double_wire_separation_x / 2.0));
+            math::Vec3 v2 = math::subtract(frame.cwAxis, math::scale(frame.trackTangentDir, registerArm->params.drop_bracket.double_wire_separation_x / 2.0));
             points.push_back(math::subtract(v2, math::scale(perpK, registerArm->params.drop_bracket.double_wire_separation_z / 2.0)));
         }
     } else {
@@ -255,8 +258,22 @@ std::vector<viewer::Line3D> SteadyArm::getRenderLines() const {
         }
         // TDP<2.2: main arm tube uses endPoint → bracketTube intersection (hookClampPoint not computed for this type)
         if (components::isTdpLt2_2(config) && !endPoint.empty()) {
-            for (size_t i = 0; i < endPoint.size(); ++i)
-                lines.push_back(viewer::Line3D("Steady Arm", endPoint[i], intersectionTubeFixedPoint, 34, 197, 94, 255, tubeR));
+            if (contactWireConfig == components::ContactWireConfiguration::DOUBLE && endPoint.size() > 1) {
+                // Offset the two bracket-tube attachment points along the track-tangent direction
+                // (XZ only, Y=0) — sign must match the CW-end ordering so the arms don't cross.
+                // points[0] = cwAxis + trackTangentDir*sep  →  pt0 must also be on the + side.
+                // points[1] = cwAxis - trackTangentDir*sep  →  pt1 must also be on the - side.
+                const double halfSep = bracketTube->params.eye_clamp.h;
+                math::Vec3 pt0 = math::add(intersectionTubeFixedPoint,      math::scale(trackTangentDir, halfSep));
+                math::Vec3 pt1 = math::subtract(intersectionTubeFixedPoint, math::scale(trackTangentDir, halfSep));
+                lines.push_back(viewer::Line3D("Steady Arm", endPoint[0], pt0, 34, 197, 94, 255, tubeR));
+                lines.push_back(viewer::Line3D("Steady Arm", endPoint[1], pt1, 34, 197, 94, 255, tubeR));
+                // Crossbar along the track direction
+                lines.push_back(viewer::Line3D("Steady Arm", pt0, pt1, 34, 197, 94, 255));
+            } else {
+                for (size_t i = 0; i < endPoint.size(); ++i)
+                    lines.push_back(viewer::Line3D("Steady Arm", endPoint[i], intersectionTubeFixedPoint, 34, 197, 94, 255, tubeR));
+            }
             lines.push_back(viewer::Line3D("Steady Arm", intersectionTubeFixedPoint, intersectionRegisterArmFixedPoint, 34, 197, 94, 255));
             if (params.hook_end_fitting)
                 lines.push_back(viewer::Line3D("Steady Arm", intersectionRegisterArmFixedPoint, hookEndFittingPoint, 34, 197, 94, 255));

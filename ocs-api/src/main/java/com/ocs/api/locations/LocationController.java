@@ -139,141 +139,217 @@ public class LocationController {
                 int off = 0;
                 for (int i = 0; i < numCantis; i++) { outputOffsets[i] = off; off += cantQtyArr[i]; }
 
-                // ── Build per-vane payloads (each vane calculated once) ───────
-                java.util.List<reactor.core.publisher.Mono<com.fasterxml.jackson.databind.JsonNode>> vaneMonos = new java.util.ArrayList<>();
-                if (vanesNode.isArray() && cantileversNode.isArray()) {
-                    com.fasterxml.jackson.databind.JsonNode[] cArr = new com.fasterxml.jackson.databind.JsonNode[numCantis];
-                    for (int ci = 0; ci < numCantis; ci++) cArr[ci] = cantileversNode.get(ci);
-                    for (int vi = 0; vi < vanesNode.size(); vi++) {
-                        com.fasterxml.jackson.databind.JsonNode v = vanesNode.get(vi);
-                        int c1i = v.path("cantileverIdx1").asInt(-1);
-                        int c2i = v.path("cantileverIdx2").asInt(-1);
-                        int p2i = v.path("poleIdx").asInt(-1);
-
-                        if (c1i < 0 || c1i >= numCantis || (c2i < 0 && p2i < 0)) {
-                            final int fvi = vi;
-                            vaneMonos.add(reactor.core.publisher.Mono.just(mapper.createObjectNode().put("_vaneIdx", fvi).put("status", "skip")));
-                            continue;
-                        }
-
-                        com.fasterxml.jackson.databind.JsonNode c1 = cArr[c1i];
-                        com.fasterxml.jackson.databind.JsonNode c2 = (c2i >= 0 && c2i < numCantis) ? cArr[c2i] : null;
-
-                        double cwH1 = c1.path("contactWireHeight").asDouble(5400), sH1 = c1.path("systemHeight").asDouble(1000);
-                        double cwo1 = c1.path("contactWireVerticalOffset").asDouble(120);
-
-                        double cwH2 = c2 != null ? c2.path("contactWireHeight").asDouble(5400) : v.path("poleContactWireHeight").asDouble(5400);
-                        double sH2 = c2 != null ? c2.path("systemHeight").asDouble(1000) : v.path("poleSystemHeight").asDouble(1000);
-                        double cwo2 = c2 != null ? c2.path("contactWireVerticalOffset").asDouble(120) : 0;
-
-                        com.fasterxml.jackson.databind.node.ObjectNode vp = mapper.createObjectNode();
-                        com.fasterxml.jackson.databind.node.ArrayNode cwS = mapper.createArrayNode(); cwS.add(c1.path("x2").asDouble()).add(cwH1 + cwo1).add(-c1.path("z2").asDouble()); vp.set("cw_start", cwS);
-                        com.fasterxml.jackson.databind.node.ArrayNode swS = mapper.createArrayNode(); swS.add(c1.path("x2").asDouble()).add(cwH1 + cwo1 + sH1).add(-c1.path("z2").asDouble()); vp.set("sw_start", swS);
-                        com.fasterxml.jackson.databind.node.ArrayNode cwE = mapper.createArrayNode(); cwE.add(v.path("x2").asDouble()).add(cwH2 + cwo2).add(-v.path("z2").asDouble()); vp.set("cw_end", cwE);
-                        com.fasterxml.jackson.databind.node.ArrayNode swE = mapper.createArrayNode(); swE.add(v.path("x2").asDouble()).add(cwH2 + cwo2 + sH2).add(-v.path("z2").asDouble()); vp.set("sw_end", swE);
-                        vp.put("qty_droppers",       v.path("qtyDroppers").asInt(0));
-                        vp.put("initial_separation", v.path("initialSeparation").asDouble(5000));
-                        vp.put("step_size",          500);
-                        vp.put("cw_weight",          v.path("cwWeight").asDouble(0.0019));
-                        vp.put("cw_tension",         v.path("cwTension").asDouble(1600));
-                        vp.put("sw_weight",          v.path("swWeight").asDouble(0.0024));
-                        vp.put("sw_tension",         v.path("swTension").asDouble(2000));
-                        vp.put("dropper_weight",     v.path("dropperWeight").asDouble(0.0006));
-                        if (v.has("liftingStartDistance") && !v.path("liftingStartDistance").isNull()) {
-                            vp.put("lifting_start_distance", v.path("liftingStartDistance").asDouble());
-                        }
-                        final int fvi = vi;
-                        vaneMonos.add(calculatorClient.calculateVane(vp)
-                            .map(vr -> { com.fasterxml.jackson.databind.node.ObjectNode e = mapper.createObjectNode(); e.put("_vaneIdx", fvi); e.put("status","success"); e.set("vane", vr.get("vane")); return (com.fasterxml.jackson.databind.JsonNode)e; })
-                            .onErrorResume(err -> reactor.core.publisher.Mono.just(mapper.createObjectNode().put("_vaneIdx", fvi).put("status","error"))));
-                    }
-                }
-
-                // ── Fan-out in parallel ───────────────────────────────────────
+                // ── Run cantilever batch first, then anchor vanes to its cwAxis/mwAxis ─
+                // Vane endpoints MUST come from the C++ solver so that terrain elevation,
+                // superelevation tilt, and zigzag offset are all correctly baked in.
                 reactor.core.publisher.Mono<com.fasterxml.jackson.databind.JsonNode> cantMono =
                     cantPayloads.size() > 0 ? calculatorClient.calculateBatch(cantPayloads)
                                              : reactor.core.publisher.Mono.just(mapper.createObjectNode());
-                reactor.core.publisher.Mono<java.util.List<com.fasterxml.jackson.databind.JsonNode>> allVanesMono =
-                    vaneMonos.isEmpty() ? reactor.core.publisher.Mono.just(java.util.Collections.emptyList())
-                                        : reactor.core.publisher.Flux.fromIterable(vaneMonos).flatMap(m -> m).collectList();
 
-                return reactor.core.publisher.Mono.zip(cantMono, allVanesMono).map(tuple -> {
-                    com.fasterxml.jackson.databind.JsonNode batchPoles = tuple.getT1().path("poles");
+                return cantMono.flatMap(batchResult -> {
+                    final com.fasterxml.jackson.databind.JsonNode batchPoles = batchResult.path("poles");
 
-                    // vaneIndex → vane result node
-                    java.util.Map<Integer, com.fasterxml.jackson.databind.JsonNode> vaneMap = new java.util.HashMap<>();
-                    for (com.fasterxml.jackson.databind.JsonNode vr : tuple.getT2()) {
-                        if ("success".equals(vr.path("status").asText()))
-                            vaneMap.put(vr.path("_vaneIdx").asInt(-1), vr.path("vane"));
-                    }
+                    // ── Build vane payloads using real cwAxis / mwAxis ────────
+                    java.util.List<reactor.core.publisher.Mono<com.fasterxml.jackson.databind.JsonNode>> vaneMonos = new java.util.ArrayList<>();
+                    if (vanesNode.isArray() && cantileversNode.isArray()) {
+                        for (int vi = 0; vi < vanesNode.size(); vi++) {
+                            final int fvi = vi;
+                            com.fasterxml.jackson.databind.JsonNode v = vanesNode.get(vi);
+                            int c1i = v.path("cantileverIdx1").asInt(-1);
+                            int c2i = v.path("cantileverIdx2").asInt(-1);
+                            int p2i = v.path("poleIdx").asInt(-1);
 
-                    // ── Build nested poles → cantilevers → vanes ─────────────
-                    com.fasterxml.jackson.databind.node.ArrayNode outPoles = mapper.createArrayNode();
-                    if (polesNode.isArray()) {
-                        for (int pi = 0; pi < polesNode.size(); pi++) {
-                            com.fasterxml.jackson.databind.JsonNode pole = polesNode.get(pi);
-                            double px = pole.path("x").asDouble(), pz = pole.path("z").asDouble();
-                            com.fasterxml.jackson.databind.node.ObjectNode pObj = mapper.createObjectNode();
-                            pObj.put("poleIndex", pi);
-                            String pLabel = pole.path("label").asText(null);
-                            if (pLabel != null) pObj.put("label", pLabel);
-                            pObj.put("x", px); pObj.put("z", pz);
-
-                            com.fasterxml.jackson.databind.node.ArrayNode cArr2 = mapper.createArrayNode();
-                            for (int ci = 0; ci < numCantis; ci++) {
-                                com.fasterxml.jackson.databind.JsonNode c = cantileversNode.get(ci);
-                                if (Math.hypot(c.path("x1").asDouble()-px, c.path("z1").asDouble()-pz) >= 500) continue;
-
-                                for (int k = 0; k < cantQtyArr[ci]; k++) {
-                                    int outIdx = outputOffsets[ci] + k;
-                                    com.fasterxml.jackson.databind.JsonNode bp = (batchPoles.isArray() && outIdx < batchPoles.size()) ? batchPoles.get(outIdx) : null;
-                                    com.fasterxml.jackson.databind.JsonNode bc = (bp != null) ? bp.path("cantilevers").path(0) : null;
-
-                                    com.fasterxml.jackson.databind.node.ObjectNode cObj = mapper.createObjectNode();
-                                    cObj.put("cantileverIndex", ci);
-                                    cObj.put("wireIndex", k);
-                                    String cLabel = c.path("label").asText(null);
-                                    if (cLabel != null) cObj.put("label", cLabel);
-                                    cObj.put("configuration", c.path("configuration").asText("TDP>2.2"));
-
-                                    // Merge pole-level + cantilever-level lines
-                                    com.fasterxml.jackson.databind.node.ArrayNode linesMerged = mapper.createArrayNode();
-                                    if (bp != null && bp.path("lines").isArray()) linesMerged.addAll((com.fasterxml.jackson.databind.node.ArrayNode) bp.path("lines"));
-                                    if (bc != null && bc.path("lines").isArray()) linesMerged.addAll((com.fasterxml.jackson.databind.node.ArrayNode) bc.path("lines"));
-                                    cObj.set("lines", linesMerged);
-                                    cObj.set("results", (bc != null && bc.path("results").isArray()) ? bc.path("results") : mapper.createArrayNode());
-
-                                    // Vanes referencing this cantilever
-                                    com.fasterxml.jackson.databind.node.ArrayNode vanesArr = mapper.createArrayNode();
-                                    if (vanesNode.isArray()) {
-                                        for (int vi = 0; vi < vanesNode.size(); vi++) {
-                                            com.fasterxml.jackson.databind.JsonNode v = vanesNode.get(vi);
-                                            int c1i = v.path("cantileverIdx1").asInt(-1), c2i = v.path("cantileverIdx2").asInt(-1);
-                                            if (c1i != ci && c2i != ci) continue;
-                                            com.fasterxml.jackson.databind.node.ObjectNode vObj = mapper.createObjectNode();
-                                            vObj.put("vaneIndex", vi);
-                                            String vLabel = v.path("label").asText(null);
-                                            if (vLabel != null) vObj.put("label", vLabel);
-                                            com.fasterxml.jackson.databind.JsonNode vr = vaneMap.get(vi);
-                                            vObj.set("lines",   (vr != null && vr.path("lines").isArray())   ? vr.path("lines")   : mapper.createArrayNode());
-                                            vObj.set("results", (vr != null && vr.path("results").isArray()) ? vr.path("results") : mapper.createArrayNode());
-                                            vanesArr.add(vObj);
-                                        }
-                                    }
-                                    cObj.set("vanes", vanesArr);
-                                    cArr2.add(cObj);
-                                }
+                            if (c1i < 0 || c1i >= numCantis || (c2i < 0 && p2i < 0)) {
+                                vaneMonos.add(reactor.core.publisher.Mono.just(mapper.createObjectNode().put("_vaneIdx", fvi).put("status", "skip")));
+                                continue;
                             }
-                            pObj.set("cantilevers", cArr2);
-                            outPoles.add(pObj);
+
+                            // ── Extract cwAxis / mwAxis for cantilever c1 from batch result ──
+                            // batchPoles[ci] is the result for cantPayloads[ci] (one pole per input)
+                            com.fasterxml.jackson.databind.JsonNode bp1 = (batchPoles.isArray() && c1i < batchPoles.size()) ? batchPoles.get(c1i) : null;
+                            com.fasterxml.jackson.databind.JsonNode bc1 = (bp1 != null) ? bp1.path("cantilevers").path(0) : null;
+                            com.fasterxml.jackson.databind.JsonNode cwAxis1 = (bc1 != null && !bc1.path("cwAxis").isMissingNode()) ? bc1.path("cwAxis") : null;
+                            com.fasterxml.jackson.databind.JsonNode mwAxis1 = (bc1 != null && !bc1.path("mwAxis").isMissingNode()) ? bc1.path("mwAxis") : null;
+
+                            com.fasterxml.jackson.databind.node.ObjectNode vp = mapper.createObjectNode();
+
+                            // cw_start: real contact-wire attachment point from C++ solver
+                            if (cwAxis1 != null && cwAxis1.isArray() && cwAxis1.size() == 3) {
+                                com.fasterxml.jackson.databind.node.ArrayNode cwS = mapper.createArrayNode();
+                                cwS.add(cwAxis1.get(0).asDouble()).add(cwAxis1.get(1).asDouble()).add(cwAxis1.get(2).asDouble());
+                                vp.set("cw_start", cwS);
+                            } else {
+                                // Fallback (flat/no-elevation) — only reached if cantilever calc failed
+                                com.fasterxml.jackson.databind.JsonNode c1fb = cantileversNode.get(c1i);
+                                com.fasterxml.jackson.databind.node.ArrayNode cwS = mapper.createArrayNode();
+                                cwS.add(c1fb.path("x2").asDouble())
+                                   .add(c1fb.path("contactWireHeight").asDouble(5400) + c1fb.path("contactWireVerticalOffset").asDouble(120))
+                                   .add(-c1fb.path("z2").asDouble());
+                                vp.set("cw_start", cwS);
+                            }
+
+                            // sw_start: real messenger-wire attachment point from C++ solver
+                            if (mwAxis1 != null && mwAxis1.isArray() && mwAxis1.size() == 3) {
+                                com.fasterxml.jackson.databind.node.ArrayNode swS = mapper.createArrayNode();
+                                swS.add(mwAxis1.get(0).asDouble()).add(mwAxis1.get(1).asDouble()).add(mwAxis1.get(2).asDouble());
+                                vp.set("sw_start", swS);
+                            } else {
+                                com.fasterxml.jackson.databind.JsonNode c1fb = cantileversNode.get(c1i);
+                                com.fasterxml.jackson.databind.node.ArrayNode swS = mapper.createArrayNode();
+                                swS.add(c1fb.path("x2").asDouble())
+                                   .add(c1fb.path("contactWireHeight").asDouble(5400) + c1fb.path("contactWireVerticalOffset").asDouble(120) + c1fb.path("systemHeight").asDouble(1000))
+                                   .add(-c1fb.path("z2").asDouble());
+                                vp.set("sw_start", swS);
+                            }
+
+                            // cw_end / sw_end: from cantilever c2 solver output, or dead-end pole fallback
+                            if (c2i >= 0 && c2i < numCantis) {
+                                com.fasterxml.jackson.databind.JsonNode bp2 = (batchPoles.isArray() && c2i < batchPoles.size()) ? batchPoles.get(c2i) : null;
+                                com.fasterxml.jackson.databind.JsonNode bc2 = (bp2 != null) ? bp2.path("cantilevers").path(0) : null;
+                                com.fasterxml.jackson.databind.JsonNode cwAxis2 = (bc2 != null && !bc2.path("cwAxis").isMissingNode()) ? bc2.path("cwAxis") : null;
+                                com.fasterxml.jackson.databind.JsonNode mwAxis2 = (bc2 != null && !bc2.path("mwAxis").isMissingNode()) ? bc2.path("mwAxis") : null;
+
+                                if (cwAxis2 != null && cwAxis2.isArray() && cwAxis2.size() == 3) {
+                                    com.fasterxml.jackson.databind.node.ArrayNode cwE = mapper.createArrayNode();
+                                    cwE.add(cwAxis2.get(0).asDouble()).add(cwAxis2.get(1).asDouble()).add(cwAxis2.get(2).asDouble());
+                                    vp.set("cw_end", cwE);
+                                } else {
+                                    com.fasterxml.jackson.databind.JsonNode c2fb = cantileversNode.get(c2i);
+                                    com.fasterxml.jackson.databind.node.ArrayNode cwE = mapper.createArrayNode();
+                                    cwE.add(c2fb.path("x2").asDouble())
+                                       .add(c2fb.path("contactWireHeight").asDouble(5400) + c2fb.path("contactWireVerticalOffset").asDouble(120))
+                                       .add(-c2fb.path("z2").asDouble());
+                                    vp.set("cw_end", cwE);
+                                }
+
+                                if (mwAxis2 != null && mwAxis2.isArray() && mwAxis2.size() == 3) {
+                                    com.fasterxml.jackson.databind.node.ArrayNode swE = mapper.createArrayNode();
+                                    swE.add(mwAxis2.get(0).asDouble()).add(mwAxis2.get(1).asDouble()).add(mwAxis2.get(2).asDouble());
+                                    vp.set("sw_end", swE);
+                                } else {
+                                    com.fasterxml.jackson.databind.JsonNode c2fb = cantileversNode.get(c2i);
+                                    com.fasterxml.jackson.databind.node.ArrayNode swE = mapper.createArrayNode();
+                                    swE.add(c2fb.path("x2").asDouble())
+                                       .add(c2fb.path("contactWireHeight").asDouble(5400) + c2fb.path("contactWireVerticalOffset").asDouble(120) + c2fb.path("systemHeight").asDouble(1000))
+                                       .add(-c2fb.path("z2").asDouble());
+                                    vp.set("sw_end", swE);
+                                }
+                            } else {
+                                // Dead-end pole attachment — no calculator cwAxis available for the end
+                                double cwH2 = v.path("poleContactWireHeight").asDouble(5400);
+                                double sH2  = v.path("poleSystemHeight").asDouble(1000);
+                                com.fasterxml.jackson.databind.node.ArrayNode cwE = mapper.createArrayNode();
+                                cwE.add(v.path("x2").asDouble()).add(cwH2).add(-v.path("z2").asDouble());
+                                vp.set("cw_end", cwE);
+                                com.fasterxml.jackson.databind.node.ArrayNode swE = mapper.createArrayNode();
+                                swE.add(v.path("x2").asDouble()).add(cwH2 + sH2).add(-v.path("z2").asDouble());
+                                vp.set("sw_end", swE);
+                            }
+
+                            vp.put("qty_droppers",       v.path("qtyDroppers").asInt(0));
+                            vp.put("initial_separation", v.path("initialSeparation").asDouble(5000));
+                            vp.put("step_size",          500);
+                            vp.put("cw_weight",          v.path("cwWeight").asDouble(0.0019));
+                            vp.put("cw_tension",         v.path("cwTension").asDouble(1600));
+                            vp.put("sw_weight",          v.path("swWeight").asDouble(0.0024));
+                            vp.put("sw_tension",         v.path("swTension").asDouble(2000));
+                            vp.put("dropper_weight",     v.path("dropperWeight").asDouble(0.0006));
+                            if (v.has("liftingStartDistance") && !v.path("liftingStartDistance").isNull()) {
+                                vp.put("lifting_start_distance", v.path("liftingStartDistance").asDouble());
+                            }
+
+                            vaneMonos.add(calculatorClient.calculateVane(vp)
+                                .map(vr -> { com.fasterxml.jackson.databind.node.ObjectNode e = mapper.createObjectNode(); e.put("_vaneIdx", fvi); e.put("status","success"); e.set("vane", vr.get("vane")); return (com.fasterxml.jackson.databind.JsonNode)e; })
+                                .onErrorResume(err -> reactor.core.publisher.Mono.just(mapper.createObjectNode().put("_vaneIdx", fvi).put("status","error"))));
                         }
                     }
 
-                    com.fasterxml.jackson.databind.node.ObjectNode response = mapper.createObjectNode();
-                    response.put("status", "success");
-                    response.set("location", mapper.valueToTree(LocationResponse.from(loc)));
-                    response.set("poles", outPoles);
-                    return ResponseEntity.ok((com.fasterxml.jackson.databind.JsonNode) response);
+                    // ── Fan-out vane calculations in parallel, then assemble response ──
+                    reactor.core.publisher.Mono<java.util.List<com.fasterxml.jackson.databind.JsonNode>> allVanesMono =
+                        vaneMonos.isEmpty() ? reactor.core.publisher.Mono.just(java.util.Collections.emptyList())
+                                            : reactor.core.publisher.Flux.fromIterable(vaneMonos).flatMap(m -> m).collectList();
+
+                    return allVanesMono.map(vaneResults -> {
+                        // vaneIndex → vane result node
+                        java.util.Map<Integer, com.fasterxml.jackson.databind.JsonNode> vaneMap = new java.util.HashMap<>();
+                        for (com.fasterxml.jackson.databind.JsonNode vr : vaneResults) {
+                            if ("success".equals(vr.path("status").asText()))
+                                vaneMap.put(vr.path("_vaneIdx").asInt(-1), vr.path("vane"));
+                        }
+
+                        // ── Build nested poles → cantilevers → vanes ─────────────
+                        com.fasterxml.jackson.databind.node.ArrayNode outPoles = mapper.createArrayNode();
+                        if (polesNode.isArray()) {
+                            for (int pi = 0; pi < polesNode.size(); pi++) {
+                                com.fasterxml.jackson.databind.JsonNode pole = polesNode.get(pi);
+                                double px = pole.path("x").asDouble(), pz = pole.path("z").asDouble();
+                                com.fasterxml.jackson.databind.node.ObjectNode pObj = mapper.createObjectNode();
+                                pObj.put("poleIndex", pi);
+                                String pLabel = pole.path("label").asText(null);
+                                if (pLabel != null) pObj.put("label", pLabel);
+                                pObj.put("x", px); pObj.put("z", pz);
+
+                                com.fasterxml.jackson.databind.node.ArrayNode cArr2 = mapper.createArrayNode();
+                                for (int ci = 0; ci < numCantis; ci++) {
+                                    com.fasterxml.jackson.databind.JsonNode c = cantileversNode.get(ci);
+                                    if (Math.hypot(c.path("x1").asDouble()-px, c.path("z1").asDouble()-pz) >= 500) continue;
+
+                                    for (int k = 0; k < cantQtyArr[ci]; k++) {
+                                        int outIdx = outputOffsets[ci] + k;
+                                        com.fasterxml.jackson.databind.JsonNode bp = (batchPoles.isArray() && outIdx < batchPoles.size()) ? batchPoles.get(outIdx) : null;
+                                        com.fasterxml.jackson.databind.JsonNode bc = (bp != null) ? bp.path("cantilevers").path(0) : null;
+
+                                        com.fasterxml.jackson.databind.node.ObjectNode cObj = mapper.createObjectNode();
+                                        cObj.put("cantileverIndex", ci);
+                                        cObj.put("wireIndex", k);
+                                        String cLabel = c.path("label").asText(null);
+                                        if (cLabel != null) cObj.put("label", cLabel);
+                                        cObj.put("configuration", c.path("configuration").asText("TDP>2.2"));
+
+                                        // Merge pole-level + cantilever-level lines
+                                        com.fasterxml.jackson.databind.node.ArrayNode linesMerged = mapper.createArrayNode();
+                                        if (bp != null && bp.path("lines").isArray()) linesMerged.addAll((com.fasterxml.jackson.databind.node.ArrayNode) bp.path("lines"));
+                                        if (bc != null && bc.path("lines").isArray()) linesMerged.addAll((com.fasterxml.jackson.databind.node.ArrayNode) bc.path("lines"));
+                                        cObj.set("lines", linesMerged);
+                                        cObj.set("results", (bc != null && bc.path("results").isArray()) ? bc.path("results") : mapper.createArrayNode());
+
+                                        // Pass cwAxis/mwAxis through so the frontend can populate
+                                        // its STOMP cache and reuse them for live vane recalculations
+                                        if (bc != null && !bc.path("cwAxis").isMissingNode()) cObj.set("cwAxis", bc.get("cwAxis"));
+                                        if (bc != null && !bc.path("mwAxis").isMissingNode()) cObj.set("mwAxis", bc.get("mwAxis"));
+
+                                        // Vanes referencing this cantilever
+                                        com.fasterxml.jackson.databind.node.ArrayNode vanesArr = mapper.createArrayNode();
+                                        if (vanesNode.isArray()) {
+                                            for (int vi = 0; vi < vanesNode.size(); vi++) {
+                                                com.fasterxml.jackson.databind.JsonNode v = vanesNode.get(vi);
+                                                int c1i = v.path("cantileverIdx1").asInt(-1), c2i = v.path("cantileverIdx2").asInt(-1);
+                                                if (c1i != ci && c2i != ci) continue;
+                                                com.fasterxml.jackson.databind.node.ObjectNode vObj = mapper.createObjectNode();
+                                                vObj.put("vaneIndex", vi);
+                                                String vLabel = v.path("label").asText(null);
+                                                if (vLabel != null) vObj.put("label", vLabel);
+                                                com.fasterxml.jackson.databind.JsonNode vr = vaneMap.get(vi);
+                                                vObj.set("lines",   (vr != null && vr.path("lines").isArray())   ? vr.path("lines")   : mapper.createArrayNode());
+                                                vObj.set("results", (vr != null && vr.path("results").isArray()) ? vr.path("results") : mapper.createArrayNode());
+                                                vanesArr.add(vObj);
+                                            }
+                                        }
+                                        cObj.set("vanes", vanesArr);
+                                        cArr2.add(cObj);
+                                    }
+                                }
+                                pObj.set("cantilevers", cArr2);
+                                outPoles.add(pObj);
+                            }
+                        }
+
+                        com.fasterxml.jackson.databind.node.ObjectNode response = mapper.createObjectNode();
+                        response.put("status", "success");
+                        response.set("location", mapper.valueToTree(LocationResponse.from(loc)));
+                        response.set("poles", outPoles);
+                        return ResponseEntity.ok((com.fasterxml.jackson.databind.JsonNode) response);
+                    });
                 });
 
             } catch (Exception e) {

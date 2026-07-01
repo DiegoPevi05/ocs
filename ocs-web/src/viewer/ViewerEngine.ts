@@ -77,7 +77,7 @@ export class ViewerEngine {
   private dynData: any = { trackPoints: [], poles: [] };
   public trackMode: 'rect' | 'poly' = 'rect';
   public selFilter = { tracks: true, poles: true, cantilevers: true, vanes: true, anchorPoints: true, anchors: true };
-  private hoveredState: { type: 'track' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor', index: number } | null = null;
+  private hoveredState: { type: 'track' | 'foundation' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor', index: number } | null = null;
 
   // Pan state (2D)
   private panning = false;
@@ -1548,7 +1548,7 @@ export class ViewerEngine {
       data.foundations.forEach((f: any, i: number) => {
         const isSelected = data.selectedFoundations?.includes(i) || false;
         const isHovered = this.hoveredState?.type === 'foundation' && this.hoveredState?.index === i;
-        const fColor = isSelected ? 0xffa500 : (isHovered ? 0x22c55e : 0x16a34a); // green foundations
+        const fColor = isSelected ? 0xffa500 : (isHovered ? 0xfbbf24 : 0xb45309); // amber-brown foundations
         
         const w = f.width ?? 600;
         const l = f.length ?? 600;

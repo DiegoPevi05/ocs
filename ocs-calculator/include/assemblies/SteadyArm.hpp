@@ -64,6 +64,8 @@ public:
 private:
     void calculateIntersections(const CantileverFrame& frame);
     math::Vec3 wireSupportStainlessSteelPoint; // from stayTube
+    // Horizontal track-tangent (XZ only, Y=0) cached from the frame for getRenderLines
+    math::Vec3 trackTangentDir;
 };
 
 } // namespace assemblies

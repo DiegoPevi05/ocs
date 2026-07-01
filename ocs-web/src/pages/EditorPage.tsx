@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   MousePointer2, Minus, CircleDot, GitMerge, Link2,
   Box, Square, RotateCcw, ArrowLeft, Save, FileDown,
-  Anchor, Layout,
+  Anchor, Layout, Upload,
 } from 'lucide-react';
 import { Client as StompClient } from '@stomp/stompjs';
 import { ViewerEngine } from '../viewer/ViewerEngine';
@@ -15,7 +15,8 @@ import { FoundationPanel } from '../components/FoundationPanel';
 import { TrackPanel } from '../components/TrackPanel';
 import { AnchorPointPanel } from '../components/AnchorPointPanel';
 import { AnchorPanel } from '../components/AnchorPanel';
-import type { DrawMode, ViewMode, SceneData, Location, TrackData, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
+import { DxfImportModal } from '../components/DxfImportModal';
+import type { DrawMode, ViewMode, SceneData, Location, TrackData, FoundationData, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
 import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,6 +139,7 @@ export default function EditorPage() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('2D');
   const [drawMode, setDrawMode] = useState<DrawMode>('none');
+  const [showDxfImport, setShowDxfImport] = useState(false);
   const [trackMode, setTrackMode] = useState<'rect' | 'poly'>('rect');
   const [autoSnap, setAutoSnap] = useState(true);
 
@@ -219,6 +221,9 @@ export default function EditorPage() {
   const engineRef = useRef<ViewerEngine | null>(null);
   const stompRef = useRef<StompClient | null>(null);
   const pendingVaneCantRef = useRef<{ cantileverIdx1: number; cantileverIdx2: number } | null>(null);
+  // Stable ref so the STOMP closure (empty deps) can call triggerVaneCalculation
+  // after cwAxis/mwAxis results arrive without needing it in the dependency array.
+  const triggerVaneCalcRef = useRef<((vaneList: VaneData[], cantList: CantileverData[], startIndex?: number) => void) | null>(null);
   const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const calcResultsRef = useRef<ApiResponse[]>([]);
   // Per-index caches populated from the initial /calculated fetch
@@ -405,6 +410,12 @@ export default function EditorPage() {
               const cached = calcByCantiIdx.current.get(editIdx);
               if (cached) setLastCantResults(cached.results);
             }
+
+            // Now that cwAxis/mwAxis are in the cache, re-trigger vane calculations
+            // so their endpoints use the real 3D attachment points from the solver.
+            if (vanesRef.current.length > 0 && triggerVaneCalcRef.current) {
+              triggerVaneCalcRef.current(vanesRef.current, cantileversRef.current);
+            }
           }
         } catch { /* ignore parse errors */ }
       });
@@ -572,7 +583,10 @@ export default function EditorPage() {
       const sysH2 = c2 ? (c2.systemHeight ?? 1000) : (v.poleSystemHeight ?? 1000);
       const cwo2 = c2 ? (c2.contactWireVerticalOffset ?? 120) : 0; // offset is usually 0 if attached directly to pole face
 
-      const foot1 = closestPointOnTracks(completedTracksRef.current, c1.x2, c1.z2);
+      // Use the raw perpendicular foot (x2raw/z2raw) for elevation lookup, not the
+      // zigzag-shifted x2/z2. On a curve the closest point on the polyline to the
+      // shifted position gives a slightly wrong interpolated Y.
+      const foot1 = closestPointOnTracks(completedTracksRef.current, c1.x2raw ?? c1.x2, c1.z2raw ?? c1.z2);
       const y1 = foot1.y;
 
       // Prefer the calculator's actual solved attachment point (cwAxis/mwAxis) over
@@ -613,7 +627,7 @@ export default function EditorPage() {
         cw_end = [endX, endY + cwH2 + cwo2, -endZ];
         sw_end = [endX, endY + cwH2 + cwo2 + sysH2, -endZ];
       } else if (c2) {
-          const foot2 = closestPointOnTracks(completedTracksRef.current, c2.x2, c2.z2);
+          const foot2 = closestPointOnTracks(completedTracksRef.current, c2.x2raw ?? c2.x2, c2.z2raw ?? c2.z2);
           const c2Calc = calcByCantiIdx.current.get(v.cantileverIdx2!);
           cw_end = c2Calc?.cwAxis ?? [c2.x2, foot2.y + cwH2 + cwo2, -c2.z2];
           sw_end = c2Calc?.mwAxis ?? [c2.x2, foot2.y + cwH2 + cwo2 + sysH2, -c2.z2];
@@ -642,6 +656,9 @@ export default function EditorPage() {
   useEffect(() => {
     if (vanes.length > 0) triggerVaneCalculation(vanes, cantilevers);
   }, [cantilevers, vanes, triggerVaneCalculation]);
+
+  // Keep the STOMP-closure ref in sync with the stable triggerVaneCalculation callback
+  useEffect(() => { triggerVaneCalcRef.current = triggerVaneCalculation; }, [triggerVaneCalculation]);
 
   const handleTrackSave = (updated: TrackData) => {
     if (editTrackIdx === null) return;
@@ -686,6 +703,8 @@ export default function EditorPage() {
 
     saveScene(completedTracks, nextPoles, cantilevers, vanes, anchorPoints, anchors, nextFoundations);
   };
+
+
 
   const handlePoleSave = (updated: PoleData) => {
     if (editPoleIdx === null) return;
@@ -747,6 +766,17 @@ export default function EditorPage() {
       setSaving(false);
     }
   }, [locationId, location]);
+
+  // ── DXF import handler ───────────────────────────────────────────────────
+  const handleDxfImport = useCallback((result: { tracks: TrackData[]; foundations: FoundationData[] }) => {
+    // Append imported geometry to the existing scene (don't replace)
+    const newTracks      = [...completedTracks, ...result.tracks.map(t => t.points)];
+    const newFoundations = [...foundations,      ...result.foundations];
+    setCompletedTracks(newTracks);
+    setFoundations(newFoundations);
+    // Persist immediately — pass data directly because state update is async
+    saveScene(newTracks, poles, cantilevers, vanes, anchorPoints, anchors, newFoundations);
+  }, [completedTracks, foundations, poles, cantilevers, vanes, anchorPoints, anchors, saveScene]);
 
   // viewer-click handler
   useEffect(() => {
@@ -1490,12 +1520,19 @@ export default function EditorPage() {
 
           <div className="tool-group">
             <ToolButton icon={<RotateCcw size={17} />} label="Reset" onClick={() => engineRef.current?.resetCamera()} />
+            <ToolButton
+              icon={<Upload size={17} />}
+              label="Import DXF"
+              onClick={() => setShowDxfImport(true)}
+              title="Import tracks and foundations from a DXF file"
+            />
           </div>
 
           <div className="toolbar-legend">
             <div className="toolbar-legend__title">Legend</div>
             <LegendItem color="#3b82f6" label="Railway Track" />
             <LegendItem color="#ef4444" label="Catenary Pole" />
+            <LegendItem color="#b45309" label="Foundation" />
             <LegendItem color="#22c55e" label="Cantilever" />
             <LegendItem color="#9333ea" label="Vane" />
             <LegendItem color="#f97316" label="Anchor Point" />
@@ -1874,6 +1911,14 @@ export default function EditorPage() {
           />
         )}
       </div>
+
+      {/* ── DXF Import Modal ─────────────────────────────────────────── */}
+      {showDxfImport && (
+        <DxfImportModal
+          onImport={handleDxfImport}
+          onClose={() => setShowDxfImport(false)}
+        />
+      )}
     </div>
   );
 }

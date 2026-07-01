@@ -34,6 +34,10 @@ public:
     math::Vec3 viaDirection;
     math::Vec3 directionPv;
     double trackInclination;
+    // Horizontal track-tangent direction at the CW contact point (XZ only, Y=0).
+    // For a straight track this is parallel to the rails; for a polyline curve it is
+    // the tangent of the curve at the closest foot point — derived as cross(Y_up, directionPvXZ).
+    math::Vec3 trackTangentDir;
 
     // Pole Attachments
     math::Vec3 bottomPoleFixedPoint;

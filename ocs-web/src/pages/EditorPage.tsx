@@ -482,8 +482,10 @@ export default function EditorPage() {
       anchorPointPreviewWidth: s.width,
       anchorPointPreviewLength: s.length,
       anchorPointPreviewHeight: s.height,
+      pendingCantilever: cantileverModal ?? undefined,
+      pendingZigzag: cantFormZZ,
     });
-  }, [trackPoints, poles, foundations, completedTracks, selectedTracks, selectedPoles, selectedFoundations, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes, anchorPoints, anchors, anchorFirstPoleIdx, selectedAnchorPoints, selectedAnchors, projectSettings.anchorPoint]);
+  }, [trackPoints, poles, foundations, completedTracks, selectedTracks, selectedPoles, selectedFoundations, cantilevers, vanes, vaneFirstCantIdx, selectedCantilevers, selectedVanes, anchorPoints, anchors, anchorFirstPoleIdx, selectedAnchorPoints, selectedAnchors, projectSettings.anchorPoint, cantileverModal, cantFormZZ]);
 
   // Auto-fit camera in 2D whenever tracks or poles are added (runs after geometry update above).
   useEffect(() => {
@@ -540,8 +542,8 @@ export default function EditorPage() {
         return {
           configuration: c.configuration ?? 'TDP>2.2',
           contactWireConfiguration: c.contactWireConfiguration ?? projectWireConfig,
-          polePosition: [c.x1, pY, -c.z1],
-          pv: [footX, footY, -footZ],
+          polePosition: [c.x1, pY, c.z1],
+          pv: [footX, footY, footZ],
           contactWireHeight: c.contactWireHeight ?? 5400,
           systemHeight: c.systemHeight ?? 1000,
           contactWireVerticalOffset: c.contactWireVerticalOffset ?? 120,
@@ -781,7 +783,7 @@ export default function EditorPage() {
   // viewer-click handler
   useEffect(() => {
     const handleViewerClick = (e: Event) => {
-      const { x, z, y, r, mode, cantileverIdx, poleIdx, anchorPointIdx, foundationIdx } = (e as CustomEvent).detail;
+      const { x, z, y, r, mode, cantileverIdx, poleIdx, anchorPointIdx, foundationIdx, trackIdx } = (e as CustomEvent).detail;
 
       if (mode === 'track') {
         const newPoints = [...trackPointsRef.current, { x, z, y, r }];
@@ -817,7 +819,14 @@ export default function EditorPage() {
         setPoleModal({ x, z, y, foundationIdx: foundationIdx !== -1 ? foundationIdx : undefined });
 
       } else if (mode === 'cantilever') {
-        const foot = closestPointOnTracks(completedTracksRef.current, x, z);
+        // The viewer picked the target track from the mouse position (trackIdx);
+        // project the pole onto that track only. Fall back to all tracks when the
+        // click came without a track choice (e.g. typed coordinates).
+        const allTracks = completedTracksRef.current;
+        const trackList = (typeof trackIdx === 'number' && trackIdx >= 0 && allTracks[trackIdx])
+          ? [allTracks[trackIdx]]
+          : allTracks;
+        const foot = closestPointOnTracks(trackList, x, z);
         setCantileverModal({ x1: x, z1: z, x2raw: foot.x, z2raw: foot.z, tx: foot.tx, tz: foot.tz });
 
       } else if (mode === 'vane') {
@@ -957,7 +966,7 @@ export default function EditorPage() {
     };
 
     const handleViewerSelect = (e: Event) => {
-      const { minX, maxX, minZ, maxZ, isPoint, hovered } = (e as CustomEvent).detail;
+      const { minX, maxX, minZ, maxZ, isPoint, hovered, isWindowSelect } = (e as CustomEvent).detail;
 
       // If the user clicked (point) while an item was hovered, select exactly that item
       if (isPoint && hovered) {
@@ -979,9 +988,11 @@ export default function EditorPage() {
       const selAP = new Set<number>();
       const selA = new Set<number>();
 
+      // Point fully inside box
       const inB = (x: number, z: number) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
 
-      const lineInB = (x1: number, z1: number, x2: number, z2: number) => {
+      // Line segment intersects the selection box (crossing test using Liang-Barsky)
+      const lineIntersectsB = (x1: number, z1: number, x2: number, z2: number) => {
         if (inB(x1, z1) || inB(x2, z2)) return true;
         let tmin = 0, tmax = 1;
         const dx = x2 - x1, dz = z2 - z1;
@@ -1000,14 +1011,29 @@ export default function EditorPage() {
         return tmin <= tmax;
       };
 
+      // Line segment fully inside the selection box (both endpoints inside)
+      const lineInsideB = (x1: number, z1: number, x2: number, z2: number) => {
+        return inB(x1, z1) && inB(x2, z2);
+      };
+
+      // AutoCAD-style selection:
+      // Window (left-to-right): only select objects FULLY inside the box
+      // Crossing (right-to-left): select anything that even partially intersects
+
       const matchedLabels = new Set<string>();
 
       if (selFilterRef.current.tracks) {
         completedTracksRef.current.forEach((tr, i) => {
-          if (tr.some(p => inB(p.x, p.z))) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); }
-          else {
-            for (let j = 1; j < tr.length; j++) {
-              if (lineInB(tr[j - 1].x, tr[j - 1].z, tr[j].x, tr[j].z)) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); break; }
+          if (isWindowSelect) {
+            // Window: all points of the track must be inside
+            if (tr.every(p => inB(p.x, p.z))) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); }
+          } else {
+            // Crossing: any point inside, or any segment intersecting
+            if (tr.some(p => inB(p.x, p.z))) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); }
+            else {
+              for (let j = 1; j < tr.length; j++) {
+                if (lineIntersectsB(tr[j - 1].x, tr[j - 1].z, tr[j].x, tr[j].z)) { selT.add(i); if (tr[0]?.label) matchedLabels.add(tr[0].label); break; }
+              }
             }
           }
         });
@@ -1027,12 +1053,20 @@ export default function EditorPage() {
       }
       if (selFilterRef.current.cantilevers) {
         cantileversRef.current.forEach((c, i) => {
-          if (lineInB(c.x1, c.z1, c.x2, c.z2)) selC.add(i);
+          if (isWindowSelect) {
+            if (lineInsideB(c.x1, c.z1, c.x2, c.z2)) selC.add(i);
+          } else {
+            if (lineIntersectsB(c.x1, c.z1, c.x2, c.z2)) selC.add(i);
+          }
         });
       }
       if (selFilterRef.current.vanes) {
         vanesRef.current.forEach((v, i) => {
-          if (lineInB(v.x1, v.z1, v.x2, v.z2)) selV.add(i);
+          if (isWindowSelect) {
+            if (lineInsideB(v.x1, v.z1, v.x2, v.z2)) selV.add(i);
+          } else {
+            if (lineIntersectsB(v.x1, v.z1, v.x2, v.z2)) selV.add(i);
+          }
         });
       }
       if (selFilterRef.current.anchorPoints) {
@@ -1042,7 +1076,11 @@ export default function EditorPage() {
       }
       if (selFilterRef.current.anchors) {
         anchorsRef.current.forEach((a, i) => {
-          if (lineInB(a.px, a.pz, a.ax, a.az)) selA.add(i);
+          if (isWindowSelect) {
+            if (lineInsideB(a.px, a.pz, a.ax, a.az)) selA.add(i);
+          } else {
+            if (lineIntersectsB(a.px, a.pz, a.ax, a.az)) selA.add(i);
+          }
         });
       }
       setSelectedTracks(Array.from(selT));
@@ -1741,6 +1779,7 @@ export default function EditorPage() {
             }}
             catenarySystem={projectSettings.catenarySystem}
             onSave={handleCreateFromPanel}
+            onFieldsChange={(f) => setCantFormZZ(f.zigzag ?? 250)}
             onClose={() => setCantileverModal(null)}
           />
         )}
@@ -1819,6 +1858,7 @@ export default function EditorPage() {
             catenarySystem={projectSettings.catenarySystem}
             onSave={handleSaveFromPanel}
             onCalculate={handleCalculateFromPanel}
+            onFieldsChange={(f) => setCantFormZZ(f.zigzag ?? 250)}
             onClose={() => {
               editCantileverIdxRef.current = null;
               setEditCantileverIdx(null);

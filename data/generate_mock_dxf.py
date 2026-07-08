@@ -54,80 +54,45 @@ def generate_dxf(filename):
         """DXF bulge = tan(sweep/4). Positive = CCW arc."""
         return math.tan(math.radians(deg / 4))
 
-    # ── geometry ─────────────────────────────────────────────────────────────
-    #
-    # Layout (plan view, X = along track, Y = cross-track):
-    #
-    #   TRACK_A   Y =  6000   ── straight 200 m ──▶
-    #   TRACK_B   Y =  0      ── straight 200 m ──▶
-    #   TRACK_BRANCH  starts between them (Y = 3000),
-    #               goes straight to X = 100 000, then curves
-    #               away to the LEFT (negative Y direction).
-    #
-    # Foundation offset from track centre = 3 000 mm (3 m)
-    # Foundation spacing = 50 000 mm (50 m)
-    # Total straight length = 200 000 mm (200 m)
-
-    TOTAL    = 200_000   # total straight length for tracks A and B
-    BRANCH_STRAIGHT = 100_000  # branch goes straight to this X
-    CURVE_R  = 80_000   # curve radius for the branch
-    FSPACING = 50_000   # foundation spacing
+    BRANCH_STRAIGHT = 100_000  # straight section before the curve
+    CURVE_R  = 80_000   # curve radius
     FOFFSET  =  3_000   # cross-track distance to foundation from track centre
 
-    # ── TRACK A (straight, at Y = 6000) ──────────────────────────────────────
-    A_Y = 6_000
-    emit_polyline_3d([
-        {'x': 0,      'y': A_Y, 'z': 0},
-        {'x': TOTAL,  'y': A_Y, 'z': 0},
-    ], 'TRACK_A')
+    # Spacing values
+    FSPACING_RECT   = 40_000   # foundation spacing on straight sections (40 m)
+    FSPACING_CURVE  = 25_000   # foundation spacing on curves (25 m)
 
-    # foundations along TRACK A (every 50 m, one per step on the outer/far side)
-    for s in range(0, TOTAL + 1, FSPACING):
-        emit_point(s, A_Y + FOFFSET, 0, 'FOUNDATION')   # outer side (positive Y)
-
-    # ── TRACK B (straight, at Y = 0) ─────────────────────────────────────────
-    B_Y = 0
-    emit_polyline_3d([
-        {'x': 0,      'y': B_Y, 'z': 0},
-        {'x': TOTAL,  'y': B_Y, 'z': 0},
-    ], 'TRACK_B')
-
-    # foundations along TRACK B (every 50 m, one per step on the outer/far side)
-    for s in range(0, TOTAL + 1, FSPACING):
-        emit_point(s, B_Y - FOFFSET, 0, 'FOUNDATION')   # outer side (negative Y)
-
-    # ── TRACK BRANCH (Y = 3000, straight → 90° curve opening LEFT) ───────────
-    # 90-degree sweep going CCW → curves toward negative Y.
-    # Start of curve:  X = BRANCH_STRAIGHT, Y = 3000
-    # End of curve:    X = BRANCH_STRAIGHT + R, Y = 3000 - R   (quarter circle)
-    # The bulge for a 90° CCW arc is +tan(22.5°); for CW (going -Y) use negative.
-    BR_Y   = 3_000
-    BR_END_X = BRANCH_STRAIGHT + CURVE_R
-    BR_END_Y = BR_Y - CURVE_R   # curves away: moves in -Y direction
+    # ── TRACK (straight → 90° CCW curve) ──────────────────────────────────────
+    TRACK_Y = 0
+    CURVE_END_X = BRANCH_STRAIGHT + CURVE_R
+    CURVE_END_Y = TRACK_Y + CURVE_R
 
     emit_polyline_3d([
-        {'x': 0,               'y': BR_Y,    'z': 0},
-        {'x': BRANCH_STRAIGHT, 'y': BR_Y,    'z': 0, 'bulge': -bulge_for_sweep_deg(90)},
-        {'x': BR_END_X,        'y': BR_END_Y,'z': 0},
-    ], 'TRACK_BRANCH')
+        {'x': 0,               'y': TRACK_Y,    'z': 0},
+        {'x': BRANCH_STRAIGHT, 'y': TRACK_Y,    'z': 0, 'bulge': bulge_for_sweep_deg(90)},
+        {'x': CURVE_END_X,     'y': CURVE_END_Y,'z': 0},
+    ], 'TRACK_CURVE')
 
-    # foundations along the branch straight section (one per step, outer side)
-    for s in range(0, BRANCH_STRAIGHT + 1, FSPACING):
-        emit_point(s, BR_Y + FOFFSET, 0, 'FOUNDATION')  # outer side (positive Y, away from track B)
+    # Foundations along the STRAIGHT section — on the -Y side (3000 mm perpendicular)
+    for s in range(0, BRANCH_STRAIGHT + 1, FSPACING_RECT):
+        emit_point(s, TRACK_Y - FOFFSET, 0, 'FOUNDATION')
 
-    # foundations along the branch curve (one per step, outward normal only)
+    # Foundations along the CURVE — outward from curve centre
+    # The curve centre is at (BRANCH_STRAIGHT, TRACK_Y + CURVE_R)
+    # The outward normal points away from the centre (radially outward)
     arc_len = math.pi / 2 * CURVE_R
-    num_arc_pts = max(1, int(arc_len / FSPACING))
-    cx, cy = BRANCH_STRAIGHT, BR_Y - CURVE_R
-    for k in range(1, num_arc_pts + 1):
-        t = k / num_arc_pts
-        angle_on_arc = math.pi / 2 - (math.pi / 2 * t)
+    cx, cy = BRANCH_STRAIGHT, TRACK_Y + CURVE_R
+    s_curve = 0
+    while s_curve <= arc_len:
+        # Angle on arc: starts at -π/2 (bottom of circle) and sweeps CCW
+        angle_on_arc = -math.pi / 2 + (s_curve / CURVE_R)
         px = cx + CURVE_R * math.cos(angle_on_arc)
         py = cy + CURVE_R * math.sin(angle_on_arc)
+        # Outward normal (away from curve centre)
         nx = math.cos(angle_on_arc)
         ny = math.sin(angle_on_arc)
-        # outward (away from centre of curve)
         emit_point(px + nx * FOFFSET, py + ny * FOFFSET, 0, 'FOUNDATION')
+        s_curve += FSPACING_CURVE
 
     end_section()
     emit(0, "EOF")

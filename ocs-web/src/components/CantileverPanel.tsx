@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { CantileverData } from '../types';
 
@@ -68,12 +68,19 @@ interface Props {
   onSave: (updated: CantileverData) => void;
   onCalculate?: (updated: CantileverData) => void;
   onClose: () => void;
+  // Fires on every field edit (not just Save/Calculate) so the caller can keep
+  // the live 2D/3D rubberband preview (e.g. zigzag sign/magnitude) in sync
+  // while the user is still typing.
+  onFieldsChange?: (updated: CantileverData) => void;
 }
 
-export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculate, onClose }: Props) {
+export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculate, onClose, onFieldsChange }: Props) {
   const [form, setForm] = useState<CantileverData>({ ...cantilever });
   const [minimized, setMinimized] = useState(false);
   const configs = catenarySystem === 'SINGLE_WIRE' ? SINGLE_WIRE_CONFIGS : DOUBLE_WIRE_CONFIGS;
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onFieldsChange?.(form); }, [form]);
 
   const set = <K extends keyof CantileverData>(key: K, val: CantileverData[K]) =>
     setForm(f => ({ ...f, [key]: val }));

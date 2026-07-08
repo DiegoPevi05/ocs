@@ -75,6 +75,11 @@ export class ViewerEngine {
 
   // Track current dynamic data for rubberband & snap context
   private dynData: any = { trackPoints: [], poles: [] };
+  // Raw (un-snapped) mouse world position — used in cantilever mode to pick
+  // which track to attach to while the cursor itself stays snapped to a pole.
+  private rawCursorX = 0;
+  private rawCursorZ = 0;
+  public snapTrackIdx = -1;
   public trackMode: 'rect' | 'poly' = 'rect';
   public selFilter = { tracks: true, poles: true, cantilevers: true, vanes: true, anchorPoints: true, anchors: true };
   private hoveredState: { type: 'track' | 'foundation' | 'pole' | 'cantilever' | 'vane' | 'anchorPoint' | 'anchor', index: number } | null = null;
@@ -479,8 +484,8 @@ export class ViewerEngine {
         const line = obj as THREE.Line;
         if (line.userData && line.userData.apiLine) {
           const al = line.userData.apiLine as ApiLine;
-          checkPt(al.start[0], -al.start[2]);
-          checkPt(al.end[0], -al.end[2]);
+          checkPt(al.start[0], al.start[2]);
+          checkPt(al.end[0], al.end[2]);
         }
       });
       // Snap to in-progress points
@@ -526,15 +531,16 @@ export class ViewerEngine {
     // Cantilever snapping
     if (this.drawMode === 'cantilever') {
       const cantPts = this.dynData.cantileverPoints || [];
-      // Single click: snap to nearest pole
+      // Single click: snap to nearest pole. No distance cap — the first click of a
+      // cantilever is always a pole, and poles can sit arbitrarily far from the track.
       if (cantPts.length === 0) {
         let closestPole: THREE.Vector2 | null = null;
         let minD = Infinity;
         this.dynData.poles.forEach(p => {
-          const d = Math.hypot(wx - p.x, wz - p.z);
-          if (d < minD) { minD = d; closestPole = new THREE.Vector2(p.x, p.z); }
+          const d = Math.hypot(wx - p.x, wz - (p.z || 0));
+          if (d < minD) { minD = d; closestPole = new THREE.Vector2(p.x, p.z || 0); }
         });
-        if (closestPole && minD < 5000) return closestPole;
+        if (closestPole) return closestPole;
       }
     }
 
@@ -705,9 +711,21 @@ export class ViewerEngine {
         this.selectionBoxDiv.style.top = Math.min(y1, y2) + 'px';
         this.selectionBoxDiv.style.width = Math.abs(x2 - x1) + 'px';
         this.selectionBoxDiv.style.height = Math.abs(y2 - y1) + 'px';
+
+        // AutoCAD-style: left-to-right = window (blue solid), right-to-left = crossing (green dashed)
+        const isWindowSelect = e.clientX >= this.selectStartX;
+        if (isWindowSelect) {
+          this.selectionBoxDiv.style.border = '1px solid rgba(59, 130, 246, 0.9)';
+          this.selectionBoxDiv.style.background = 'rgba(59, 130, 246, 0.12)';
+        } else {
+          this.selectionBoxDiv.style.border = '1px dashed rgba(34, 197, 94, 0.9)';
+          this.selectionBoxDiv.style.background = 'rgba(34, 197, 94, 0.12)';
+        }
       }
 
       const w = this.toWorld(e);  // w.x = world X, w.y = world Z
+      this.rawCursorX = w.x;
+      this.rawCursorZ = w.y;
 
       if (this.drawMode === 'none' && !this.isSelecting) {
         const threshold = 60 / this.cam2D.zoom;
@@ -881,7 +899,7 @@ export class ViewerEngine {
       const r = parseFloat(((this as any)._rInput as HTMLInputElement)?.value) || 0;
       const y = parseFloat(((this as any)._yInput as HTMLInputElement)?.value) || 0;
       this.container.dispatchEvent(new CustomEvent('viewer-click', {
-        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx, poleIdx: this.snapPoleIdx, anchorPointIdx: this.snapAnchorPointIdx, foundationIdx: this.snapFoundationIdx }
+        detail: { x: cx, z: cz, y: y, r: r, mode: this.drawMode, cantileverIdx: this.snapCantileverIdx, poleIdx: this.snapPoleIdx, anchorPointIdx: this.snapAnchorPointIdx, foundationIdx: this.snapFoundationIdx, trackIdx: this.snapTrackIdx }
       }));
     } else if (e.button === 0 && this.drawMode === 'none') {
       this.isSelecting = true;
@@ -915,8 +933,11 @@ export class ViewerEngine {
       const minZ = Math.min(w1.y, w2.y) - (dy < 3 ? 50 : 0);
       const maxZ = Math.max(w1.y, w2.y) + (dy < 3 ? 50 : 0);
 
+      // AutoCAD-style: left-to-right = window (fully inside), right-to-left = crossing (partial)
+      const isWindowSelect = e.clientX >= this.selectStartX;
+
       this.container.dispatchEvent(new CustomEvent('viewer-select', {
-        detail: { minX, maxX, minZ, maxZ, isPoint: dx < 3 && dy < 3, hovered: this.hoveredState }
+        detail: { minX, maxX, minZ, maxZ, isPoint: dx < 3 && dy < 3, hovered: this.hoveredState, isWindowSelect }
       }));
     }
   }
@@ -1223,7 +1244,7 @@ export class ViewerEngine {
         boxGeo.translate(0, -visualHeight / 2, 0);
         const boxMat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.5 });
         const box = new THREE.Mesh(boxGeo, boxMat);
-        box.position.set(finalX, yVal, -finalZ);
+        box.position.set(finalX, yVal, finalZ);
         box.layers.set(2);
         this.rubberbandGroup.add(box);
       }
@@ -1352,12 +1373,14 @@ export class ViewerEngine {
         this.rubberbandGroup.add(line);
       }
     } else if (this.drawMode === 'cantilever') {
-      // Find nearest track foot + track segment direction for zigzag
-      let footX = wx, footZ = wz;
-      let minDist = Infinity;
-      let segDirX = 1, segDirZ = 0;
+      // The cursor (wx, wz) is snapped to the nearest pole. The RAW mouse
+      // position picks WHICH track the cantilever attaches to; the foot is
+      // then the perpendicular projection of the POLE onto that track.
+      const mX = this.rawCursorX, mZ = this.rawCursorZ;
 
-      const sampleForFoot = (tr: { x: number, z: number, r?: number }[]) => {
+      // Nearest point on one track polyline (segments + sampled arcs) to (px, pz)
+      const projectOnTrack = (tr: { x: number, z: number, r?: number }[], px: number, pz: number): { x: number, z: number, d: number } => {
+        let footX = px, footZ = pz, minDist = Infinity;
         for (let i = 1; i < tr.length; i++) {
           const prev = tr[i - 1], curr = tr[i];
           if (curr.r && Math.abs(curr.r) > 1) {
@@ -1377,13 +1400,8 @@ export class ViewerEngine {
               for (let s = 0; s <= 32; s++) {
                 const a = sa + arcSweep * s / 32;
                 const qx = cx + R * Math.cos(a), qz = cz + R * Math.sin(a);
-                const dist = Math.hypot(wx - qx, wz - qz);
-                if (dist < minDist) {
-                  minDist = dist; footX = qx; footZ = qz;
-                  // tangent direction at arc point
-                  segDirX = -Math.sin(a); segDirZ = Math.cos(a);
-                  if (curr.r < 0) { segDirX = -segDirX; segDirZ = -segDirZ; }
-                }
+                const dist = Math.hypot(px - qx, pz - qz);
+                if (dist < minDist) { minDist = dist; footX = qx; footZ = qz; }
               }
               continue;
             }
@@ -1391,31 +1409,36 @@ export class ViewerEngine {
           const dx = curr.x - prev.x, dz = curr.z - prev.z;
           const len2 = dx * dx + dz * dz;
           if (len2 === 0) continue;
-          const t = Math.max(0, Math.min(1, ((wx - prev.x) * dx + (wz - prev.z) * dz) / len2));
+          const t = Math.max(0, Math.min(1, ((px - prev.x) * dx + (pz - prev.z) * dz) / len2));
           const qx = prev.x + t * dx, qz = prev.z + t * dz;
-          const dist = Math.hypot(wx - qx, wz - qz);
-          if (dist < minDist) {
-            minDist = dist; footX = qx; footZ = qz;
-            const len = Math.hypot(dx, dz);
-            segDirX = len > 0 ? dx / len : 1; segDirZ = len > 0 ? dz / len : 0;
-          }
+          const dist = Math.hypot(px - qx, pz - qz);
+          if (dist < minDist) { minDist = dist; footX = qx; footZ = qz; }
         }
+        return { x: footX, z: footZ, d: minDist };
       };
 
-      if (this.dynData.completedTracks) {
-        this.dynData.completedTracks.forEach(tr => sampleForFoot(tr));
-      }
+      // Pick the track nearest to the mouse
+      const tracks: { x: number, z: number, r?: number }[][] = this.dynData.completedTracks || [];
+      let bestTrack = -1, bestD = Infinity;
+      tracks.forEach((tr, i) => {
+        const f = projectOnTrack(tr, mX, mZ);
+        if (f.d < bestD) { bestD = f.d; bestTrack = i; }
+      });
+      this.snapTrackIdx = bestTrack;
 
-      if (minDist < Infinity) {
+      if (bestTrack >= 0) {
+        // Foot = projection of the snapped pole onto the chosen track
+        const foot = projectOnTrack(tracks[bestTrack], wx, wz);
+
         // Apply zigzag offset along the PV direction (pole to track foot)
         const zz = this.cantileverZigzag;
-        const dx = footX - wx;
-        const dz = footZ - wz;
+        const dx = foot.x - wx;
+        const dz = foot.z - wz;
         const len = Math.hypot(dx, dz);
         let ux = 0, uz = 0;
         if (len > 0) { ux = dx / len; uz = dz / len; }
-        const zfX = footX + ux * zz;
-        const zfZ = footZ + uz * zz;
+        const zfX = foot.x + ux * zz;
+        const zfZ = foot.z + uz * zz;
 
         // Dashed perpendicular arm: cursor/pole → zigzag-adjusted foot
         const geo = new THREE.BufferGeometry().setFromPoints([
@@ -1513,8 +1536,8 @@ export class ViewerEngine {
       line2d.layers.set(1);
       this.dynamicGroup.add(line2d);
 
-      // 3D (layer 2): negated Z so +z_editor is far from camera = top of 3D view
-      const line3d = new THREE.Line(new THREE.BufferGeometry().setFromPoints(buildTrackPts(trackArr, -1)), new THREE.LineBasicMaterial({ color: trackColor }));
+      // 3D (layer 2): use un-negated scene Z
+      const line3d = new THREE.Line(new THREE.BufferGeometry().setFromPoints(buildTrackPts(trackArr, 1)), new THREE.LineBasicMaterial({ color: trackColor }));
       line3d.layers.set(2);
       this.dynamicGroup.add(line3d);
 
@@ -1532,7 +1555,7 @@ export class ViewerEngine {
           (() => { const g = new THREE.CircleGeometry(80, 16); g.rotateX(-Math.PI / 2); return g; })(),
           new THREE.MeshBasicMaterial({ color: nodeColor, side: THREE.DoubleSide }),
         );
-        dot3d.position.set(p.x, p.y || 0, -(p.z));
+        dot3d.position.set(p.x, p.y || 0, p.z || 0);
         dot3d.layers.set(2);
         this.dynamicGroup.add(dot3d);
       });
@@ -1582,7 +1605,7 @@ export class ViewerEngine {
         boxGeo.translate(0, -visualHeight / 2, 0); // extend slightly downwards so the pole rests exactly on top
         const boxMat = new THREE.MeshPhongMaterial({ color: fColor });
         const mesh3d = new THREE.Mesh(boxGeo, boxMat);
-        mesh3d.position.set(f.x, f.y || 0, -(f.z));
+        mesh3d.position.set(f.x, f.y || 0, f.z || 0);
         mesh3d.layers.set(2);
         this.dynamicGroup.add(mesh3d);
       });
@@ -1627,7 +1650,7 @@ export class ViewerEngine {
         geo.translate(0, poleH / 2, 0);
         mesh3d = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: poleColor }));
       }
-      mesh3d.position.set(p.x, p.y || 0, -(p.z || 0));
+      mesh3d.position.set(p.x, p.y || 0, p.z || 0);
       mesh3d.layers.set(2);
       this.dynamicGroup.add(mesh3d);
     });
@@ -1674,6 +1697,34 @@ export class ViewerEngine {
             this.dynamicGroup.add(mesh);
           });
         }
+      });
+    }
+
+    // Pending cantilever (config panel open, not yet saved): persistent dashed
+    // green preview from pole to zigzag-adjusted foot, visible in 2D and 3D.
+    if (data.pendingCantilever) {
+      const pc = data.pendingCantilever;
+      const zz = data.pendingZigzag ?? 250;
+      const dx = pc.x2raw - pc.x1, dz = pc.z2raw - pc.z1;
+      const len = Math.hypot(dx, dz);
+      const ux = len > 0 ? dx / len : 0, uz = len > 0 ? dz / len : 0;
+      const zfX = pc.x2raw + ux * zz, zfZ = pc.z2raw + uz * zz;
+      [1, 2].forEach(layer => {
+        const geo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(pc.x1, 0, pc.z1),
+          new THREE.Vector3(zfX, 0, zfZ),
+        ]);
+        const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x22c55e, dashSize: 150, gapSize: 100 }));
+        line.computeLineDistances();
+        line.layers.set(layer);
+        this.dynamicGroup.add(line);
+
+        const cgeo = new THREE.CircleGeometry(120, 16);
+        cgeo.rotateX(-Math.PI / 2);
+        const dot = new THREE.Mesh(cgeo, new THREE.MeshBasicMaterial({ color: 0x16a34a, side: THREE.DoubleSide }));
+        dot.position.set(zfX, 1, zfZ);
+        dot.layers.set(layer);
+        this.dynamicGroup.add(dot);
       });
     }
 
@@ -1740,7 +1791,7 @@ export class ViewerEngine {
         const boxGeo = new THREE.BoxGeometry(apW * 2, apH, apL * 2);
         const boxMat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.8 });
         const box = new THREE.Mesh(boxGeo, boxMat);
-        box.position.set(ap.x, (ap.y || 0) + apH / 2, -(ap.z || 0));
+        box.position.set(ap.x, (ap.y || 0) + apH / 2, ap.z || 0);
         box.layers.set(2);
         this.dynamicGroup.add(box);
       });
@@ -1824,8 +1875,8 @@ export class ViewerEngine {
       this.labelsContainer.appendChild(div);
     };
 
-    // In 3D mode all scene objects use Z = -z_editor; labels must project from scene coords.
-    const sz = (z: number) => this.viewMode === '3D' ? -z : z;
+    // Scene Z now equals editor Z in both 2D and 3D — no negation needed.
+    const sz = (z: number) => z;
 
     this.dynData.poles.forEach(p => {
       if (p.label) addLbl(`${p.label} (H: ${Math.round(p.h || 3000)})`, new THREE.Vector3(p.x + 400, (p.y || 0) + (p.h || 3000) + 200, sz(p.z || 0)));
@@ -1991,7 +2042,7 @@ export class ViewerEngine {
     this.cam2D.updateProjectionMatrix();
 
     // 3D: scene Z = -z_editor; camera at positive scene-Z side (+X right on screen).
-    const sceneCenterZ = -centerZ;
+    const sceneCenterZ = centerZ;
     // Railway scenes in mm can be very elongated (long track, short height).
     // Use pole height to set a comfortable close-up distance rather than full track length.
     const poleH = Math.max(maxY, 3000);
@@ -2080,10 +2131,10 @@ export class ViewerEngine {
 
     const viewDistance = 3500;
 
-    // Scene Z = -editor Z
-    this.cam3D.position.set(cx + px * viewDistance, cy, -(cz + pz * viewDistance));
-    this.cam3D.lookAt(cx, cy, -cz);
-    this.controls.target.set(cx, cy, -cz);
+    // Scene Z = editor Z
+    this.cam3D.position.set(cx + px * viewDistance, cy, cz + pz * viewDistance);
+    this.cam3D.lookAt(cx, cy, cz);
+    this.controls.target.set(cx, cy, cz);
     this.controls.update();
   }
 
@@ -2120,10 +2171,10 @@ export class ViewerEngine {
     // Pull the camera back enough to see the full vane span + some vertical room
     const viewDistance = Math.max(vaneLen * 0.6, 4000);
 
-    // Scene Z = -editor Z
-    this.cam3D.position.set(cx + nx * viewDistance, cy + 1500, -(cz + nz * viewDistance));
-    this.cam3D.lookAt(cx, cy, -cz);
-    this.controls.target.set(cx, cy, -cz);
+    // Scene Z = editor Z
+    this.cam3D.position.set(cx + nx * viewDistance, cy + 1500, cz + nz * viewDistance);
+    this.cam3D.lookAt(cx, cy, cz);
+    this.controls.target.set(cx, cy, cz);
     this.controls.update();
   }
 

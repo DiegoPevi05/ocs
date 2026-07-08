@@ -174,7 +174,7 @@ export default function App() {
     };
 
     const handleViewerSelect = (e: Event) => {
-      const { minX, maxX, minZ, maxZ } = (e as CustomEvent).detail;
+      const { minX, maxX, minZ, maxZ, isWindowSelect } = (e as CustomEvent).detail;
       const selT = new Set<number>();
       const selP = new Set<number>();
       const inB = (x: number, z: number) => x >= minX && x <= maxX && z >= minZ && z <= maxZ;
@@ -183,9 +183,18 @@ export default function App() {
 
       if (selFilterRef.current.tracks) {
         completedTracksRef.current.forEach((tr, i) => {
-          if (tr.some(p => inB(p.x, p.z))) {
-            selT.add(i);
-            if (tr[0]?.label) matchedLabels.add(tr[0].label);
+          if (isWindowSelect) {
+            // Window: all points must be inside
+            if (tr.every(p => inB(p.x, p.z))) {
+              selT.add(i);
+              if (tr[0]?.label) matchedLabels.add(tr[0].label);
+            }
+          } else {
+            // Crossing: any point inside
+            if (tr.some(p => inB(p.x, p.z))) {
+              selT.add(i);
+              if (tr[0]?.label) matchedLabels.add(tr[0].label);
+            }
           }
         });
         completedTracksRef.current.forEach((tr, i) => {

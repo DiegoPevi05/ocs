@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<title>CALCULATION REPORT</title>
+
+	<style>
+		@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+
+	</style>
+	<style>
+		/* Set up A4 page size */
+		@page {
+			size: A4;
+			margin: 60px 30px;
+		}
+
+    /* ============================= */
+    /*        COMMON PAGES STYLES     */
+    /* ============================= */
+
+		body {
+			font-family: 'Poppins', sans-serif;
+			color: #000;
+			margin: 0;
+			padding: 0px 5mm;
+		}
+
+    .content-page {
+      width:100%;
+      height:auto;
+    }
+
+		 .content-page.cantilevers h1,
+		 .content-page.vanes h1{
+			font-size: 1rem;
+			color: #000000;
+			text-align: center;
+			margin-top: 0;
+		}
+
+		.table-header {
+			display: grid;
+			grid-template-columns: 0.5fr 1fr 0.5fr 1fr 0.5fr 1fr;
+			width: 100%;
+			justify-items: start;
+			border-bottom: 0.5px solid #5C6C7B;
+			font-size: 10px;
+		}
+
+		.table-header>* {
+			padding: 5px 0 0px 5px;
+			margin-bottom: 15px;
+		}
+
+		.table-header p:nth-child(1),
+		.table-header p:nth-child(3),
+		.table-header p:nth-child(5) {
+			color: #5C6C7B;
+			font-weight: 700;
+		}
+
+    /* ============================= */
+    /*    END COMMON PAGES STYLES     */
+    /* ============================= */
+
+
+    /* ============================= */
+    /*  CANTILEVERS PAGES STYLES*/
+    /* ============================= */
+
+		.content-page.cantilevers table{
+			width: 100%;
+			border-collapse: collapse;
+		}
+
+		.content-page.cantilevers th,
+		.content-page.cantilevers td{
+			border: 1px solid #ddd;
+			padding: 4px;
+			text-align: left;
+			font-size: 0.7rem;
+			font-weight: 400;
+		}
+
+		.content-page.cantilevers th{
+			background-color: transparent;
+		}
+
+		.content-page.cantilevers .table-container{
+			width: 100%;
+			max-width: 100%;
+			overflow: hidden;
+			margin-top: 20px;
+			page-break-inside: avoid;
+		}
+
+		.content-page.cantilevers .table-container .headings>th {
+			width: calc(100% / 6);
+		}
+
+
+		.content-page.cantilevers .table-container .headings th:nth-child(1),
+		.content-page.cantilevers .table-container .headings th:nth-child(3),
+		.content-page.cantilevers .table-container .headings th:nth-child(5) {
+			color: #5C6C7B;
+			font-weight: 700;
+		}
+
+		.content-page.cantilevers .table-container .title>th {
+			width: 100%;
+			font-size: 1.2rem;
+			color: #000;
+			font-weight: 700;
+		}
+
+		.content-page.cantilevers .table-container .headers>th {
+			border-top: 0px;
+			color: #5C6C7B;
+			font-weight: 700;
+		}
+
+    /* ============================= */
+    /*  END CANTILEVERS PAGES STYLES */
+    /* ============================= */
+
+    /* ============================= */
+    /*       VANES PAGES STYLES      */
+    /* ============================= */
+
+		.content-page.vanes table {
+			width: 100%;
+			border-collapse: collapse;
+		}
+
+		.content-page.vanes th,
+		.content-page.vanes td {
+			border: 0.5px solid #ddd;
+			padding: 2px 4px;
+			text-align: left;
+			font-size: 0.7rem;
+			font-weight: 400;
+		}
+
+		.content-page.vanes th{
+			background-color: transparent;
+		}
+
+		.content-page.vanes .dropper-values {
+			text-align: center;
+		}
+
+		.content-page.vanes .table-container {
+			width: 100%;
+			max-width: 100%;
+			overflow: hidden;
+			margin-top: 20px;
+			page-break-inside: avoid;
+		}
+
+	  .content-page.vanes .table-container .headings>th {
+			width: calc(100% / 8);
+			font-size: 0.7rem;
+		}
+
+	  .content-page.vanes .table-container .headings_second>th {
+			width: calc(100% / 8);
+		}
+
+		.content-page.vanes .table-container .headings th:nth-child(1),
+		.content-page.vanes .table-container .headings th:nth-child(3),
+		.content-page.vanes .table-container .headings th:nth-child(5),
+		.content-page.vanes .table-container .headings th:nth-child(7) {
+			color: #5C6C7B;
+			font-weight: 700;
+		}
+
+	.content-page.vanes .table-container .headings_second th:nth-child(1),
+	.content-page.vanes .table-container .headings_second th:nth-child(3),
+	.content-page.vanes .table-container .headings_second th:nth-child(5),
+	.content-page.vanes .table-container .headings_second th:nth-child(7) {
+			color: #5C6C7B;
+			font-weight: 700;
+		}
+
+	.content-page.vanes .table-container .title>th {
+			width: 100%;
+			color: #000000;
+			font-weight: 700;
+	}
+
+	.content-page.vanes .table-container .headers>th {
+			border-top: 0px;
+			color: #5C6C7B;
+			font-weight: 700;
+	}
+
+	.content-page.vanes .table-container>td {
+			font-size: 0.4rem;
+			padding: 0px 0px;
+	}
+
+    /* ============================= */
+    /*  END VANES PAGES STYLES     */
+    /* ============================= */
+
+
+    /* ============================= */
+    /*        COVER PAGE STYLES     */
+    /* ============================= */
+
+    .cover-page {
+      width: 210mm;
+      height: 297mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, sans-serif;
+      padding: 0mm 15mm;
+      box-sizing: border-box;
+    }
+
+    .cover-page .title {
+      font-size: 28pt;
+      font-weight: bold;
+      margin-bottom: 20px;
+      text-align: center;
+      text-transform: capitalize;
+    }
+
+    .cover-page .logo-company {
+      font-size: 18pt;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .cover-page .title-section {
+      font-size: 16pt;
+      margin-bottom: 40px;
+      text-align: center;
+      max-width: 80%;
+      text-transform: capitalize;
+    }
+
+    .cover-page .table-title-page {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: center;
+    }
+
+    .cover-page .table-title-page th {
+      text-align:center;
+      font-size: 12pt;
+      font-weight: bold;
+      padding: 10px;
+      border-bottom: 1px solid #000;
+    }
+
+    .cover-page .table-title-page td {
+      text-align:center;
+      font-size: 10pt;
+      padding: 10px;
+    }
+
+    /* ============================= */
+    /*    END COVER PAGE STYLES     */
+    /* ============================= */
+
+	</style>
+</head>
+
+<body>
+
+  <div class="cover-page">
+    <div class="logo-company">{{COVER_PAGE_LOGO_COMPANY}}</div>
+    <h1 class="title">{{COVER_PAGE_REPORT_TITLE}}</h1>
+    <p class="title-section">{{COVER_PAGE_DESCRIPTION_TITLE}}</p>
+    <table class="table-title-page">
+      <tr>
+        <th>{{PROJECT_NAME_HEADER}}</th>
+        <th>{{CREATED_BY_HEADER}}</th>
+        <th>{{CREATION_DATE_HEADER}}</th>
+        <th>{{REVISION_HEADER}}</th>
+      </tr>
+      <tr>
+        <td>{{PROJECT_NAME}}</td>
+        <td>{{CREATED_BY}}</td>
+        <td>{{CREATION_DATE}}</td>
+        <td>{{REVISION}}</td>
+      </tr>
+    </table>
+  </div>
+
+  {{CANTILEVERS_SECTION}}
+
+  {{VANES_SECTION}}
+
+  <div style="page-break-before: always;"><!-- blank --></div>
+
+</body>
+
+</html>

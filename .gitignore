@@ -35,3 +35,6 @@ ocs-calculator/build/
 *.iml
 .DS_Store
 Thumbs.db
+
+#old program
+old-program/*

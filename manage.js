@@ -127,6 +127,8 @@ function cmdInstall() {
   log.step('JavaScript  — npm install');
   const npmRc = run('npm', ['install'], 'ocs-web');
   if (npmRc !== 0) log.abort(`npm install failed (exit ${npmRc})`, npmRc);
+  const mcpRc = run('npm', ['install'], 'ocs-mcp');
+  if (mcpRc !== 0) log.abort(`npm install mcp failed (exit ${mcpRc})`, mcpRc);
   log.ok('JS deps ready');
 
   console.log(`\n${A.b}${A.green}All dependencies installed.${A.r}\n`);
@@ -171,6 +173,16 @@ function cmdBuild() {
   if (viteRc !== 0) log.abort(`Vite build failed (exit ${viteRc})`, viteRc);
   log.ok('ocs-web built');
 
+  log.step('ocs-mcp  (tsc)');
+  if (!existsSync(path.join(ROOT, 'ocs-mcp', 'node_modules'))) {
+    log.warn('mcp node_modules missing — running npm install …');
+    const installMcpRc = run('npm', ['install'], 'ocs-mcp');
+    if (installMcpRc !== 0) log.abort(`npm install failed (exit ${installMcpRc})`, installMcpRc);
+  }
+  const mcpBuildRc = run('npm', ['run', 'build'], 'ocs-mcp');
+  if (mcpBuildRc !== 0) log.abort(`MCP build failed (exit ${mcpBuildRc})`, mcpBuildRc);
+  log.ok('ocs-mcp built');
+
   console.log(`\n${A.b}${A.green}All builds passed.${A.r}\n`);
 }
 
@@ -210,6 +222,14 @@ function cmdDev() {
       cmd: 'npm',
       args: ['run', 'dev'],
       cwd: path.join(ROOT, 'ocs-web'),
+      shell: IS_WIN,
+    },
+    {
+      name: 'mcp',
+      color: A.blue,
+      cmd: 'npm',
+      args: ['run', 'dev'],
+      cwd: path.join(ROOT, 'ocs-mcp'),
       shell: IS_WIN,
     },
   ];

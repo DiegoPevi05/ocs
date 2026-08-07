@@ -154,7 +154,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
         importedTracks.push({
           id:     crypto.randomUUID(),
           label:  row.label,
-          points: row.trackData.points.map(p => ({ x: p.x, z: p.z, y: p.y })),
+          points: row.trackData.points.map(p => ({ x: p.x, z: p.z, y: p.y, r: p.r })),
         });
       } else if (row.classification === 'foundation' && row.foundationData) {
         importedFoundations.push({

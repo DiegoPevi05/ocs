@@ -10,6 +10,7 @@ export interface DxfPoint {
   x: number;
   z: number;
   y: number; // elevation
+  r?: number; // signed arc radius (from DXF bulge); >0 = CCW, <0 = CW
 }
 
 export interface ParsedTrack {
@@ -210,43 +211,17 @@ export function parseDxf(text: string, overrideScale?: number): ParsedDxfScene {
     tracks.push({ label, layer, points: pts, entityType: 'LINE' });
   }
 
-  function tessellateBulge(x1: number, y1: number, z1: number, x2: number, y2: number, z2: number, b: number) {
-    if (Math.abs(b) < 1e-6) return [];
-    
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const L = Math.sqrt(dx*dx + dy*dy);
-    if (L < 1e-6) return [];
-    
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const d = (1 - b*b) / (4 * b);
-    const cx = mx - dy * d;
-    const cy = my + dx * d;
-    
-    const radius = Math.sqrt((x1 - cx)**2 + (y1 - cy)**2);
-    
-    let a1 = Math.atan2(y1 - cy, x1 - cx);
-    let a2 = Math.atan2(y2 - cy, x2 - cx);
-    
-    if (b > 0 && a2 <= a1) a2 += 2 * Math.PI;
-    if (b < 0 && a2 >= a1) a2 -= 2 * Math.PI;
-    
-    const sweep = a2 - a1;
-    const segs = Math.max(2, Math.ceil(Math.abs(sweep) / 0.1)); // ~5.7 deg steps
-    
-    const pts = [];
-    for (let i = 1; i < segs; i++) {
-        const t = i / segs;
-        const angle = a1 + t * sweep;
-        const z = z1 + t * (z2 - z1);
-        pts.push({
-            x: cx + radius * Math.cos(angle),
-            y: cy + radius * Math.sin(angle),
-            z: z
-        });
-    }
-    return pts;
+  /**
+   * Convert DXF bulge to a signed arc radius (in DXF units).
+   * bulge = tan(sweep_angle / 4); radius = chord × (1 + b²) / (4|b|)
+   * Sign convention: bulge > 0 → CCW → positive radius.
+   */
+  function bulgeToSignedRadius(x1: number, y1: number, x2: number, y2: number, b: number): number | undefined {
+    if (Math.abs(b) < 1e-8) return undefined;
+    const chord = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+    if (chord < 1e-8) return undefined;
+    const R = chord * (1 + b * b) / (4 * Math.abs(b));
+    return Math.sign(b) * R;
   }
 
   function parseLwPolyline() {
@@ -276,15 +251,17 @@ export function parseDxf(text: string, overrideScale?: number): ParsedDxfScene {
     const pts: DxfPoint[] = [];
     for (let k = 0; k < vertices.length; k++) {
       const v = vertices[k];
-      pts.push({ x: sx(v.x), z: sz(v.y), y: sy(elevation) });
-      
-      if (k < vertices.length - 1 && v.b !== 0) {
-         const vNext = vertices[k+1];
-         const arcPts = tessellateBulge(v.x, v.y, elevation, vNext.x, vNext.y, elevation, v.b);
-         for (const ap of arcPts) {
-            pts.push({ x: sx(ap.x), z: sz(ap.y), y: sy(ap.z) });
-         }
+      const pt: DxfPoint = { x: sx(v.x), z: sz(v.y), y: sy(elevation) };
+
+      // If the *previous* vertex had bulge, this point is the arc endpoint.
+      // Compute signed radius and attach it to this point (matches TrackPoint.r convention).
+      if (k > 0 && vertices[k - 1].b !== 0) {
+        const prev = vertices[k - 1];
+        const rDxf = bulgeToSignedRadius(prev.x, prev.y, v.x, v.y, prev.b);
+        if (rDxf !== undefined) pt.r = rDxf * scale;
       }
+
+      pts.push(pt);
     }
 
     const label = autoLabel('LWPOLYLINE', layer, tracks.length + 1);
@@ -327,15 +304,16 @@ export function parseDxf(text: string, overrideScale?: number): ParsedDxfScene {
     const pts: DxfPoint[] = [];
     for (let k = 0; k < vertices.length; k++) {
       const v = vertices[k];
-      pts.push({ x: sx(v.x), z: sz(v.y), y: sy(v.z) });
-      
-      if (k < vertices.length - 1 && v.b !== 0) {
-         const vNext = vertices[k+1];
-         const arcPts = tessellateBulge(v.x, v.y, v.z, vNext.x, vNext.y, vNext.z, v.b);
-         for (const ap of arcPts) {
-            pts.push({ x: sx(ap.x), z: sz(ap.y), y: sy(ap.z) });
-         }
+      const pt: DxfPoint = { x: sx(v.x), z: sz(v.y), y: sy(v.z) };
+
+      // If the *previous* vertex had bulge, compute arc radius for this endpoint.
+      if (k > 0 && vertices[k - 1].b !== 0) {
+        const prev = vertices[k - 1];
+        const rDxf = bulgeToSignedRadius(prev.x, prev.y, v.x, v.y, prev.b);
+        if (rDxf !== undefined) pt.r = rDxf * scale;
       }
+
+      pts.push(pt);
     }
 
     const label = autoLabel('POLYLINE', layer, tracks.length + 1);

@@ -1,0 +1,38 @@
+Assunto: Proposta de migração e evolução para o novo sistema OCS
+
+Olá Dalton,
+
+Em seguimento ao meu e-mail anterior, escrevo novamente para apresentar uma estimativa de tempos mais detalhada e estruturar o próximo passo evolutivo do sistema OCS.
+
+A arquitetura atual (Remix, TypeScript e Prisma) tem-nos dado ótimos resultados. No entanto, como uma grande melhoria para escalar a nossa capacidade de processar cálculos de altíssima precisão e preparar o software para o futuro, estruturei uma nova arquitetura de alto desempenho: um motor de cálculo puro em C++, uma API robusta em Java e o frontend em JavaScript. 
+
+O objetivo central desta proposta é realizar uma migração completa do sistema atual para a nova arquitetura. Quero reforçar que este novo sistema contempla 100% das características e regras de negócio do sistema atual (incluindo todos os cálculos atuais de elevação e braços). Não haverá nenhuma perda de funcionalidades, apenas ganhos significativos de desempenho e novas ferramentas.
+
+Vantagens e Novas Funcionalidades Exclusivas:
+
+* Precisão matemática absoluta e Cálculos Mecânicos: O motor em C++ eliminará as limitações atuais, permitindo-nos ir além do posicionamento geométrico para incluir cálculos mecânicos e de esforços (estresse físico) avançados, atestando a viabilidade estrutural da catenária.
+* Geração de Projetos Automatizada via IA: O sistema não fará apenas o desenho passivo. O utilizador poderá fornecer a localização das vias e fundações, e enviar instruções diretas à IA para que ela gere automaticamente toda a alocação de postes, triângulos e suspensórios de forma otimizada.
+* Integração Bidirecional Completa com AutoCAD (DWF): Atualmente, o sistema já importa as vias e fundações de arquivos DWF. Com a nova arquitetura, assim que a IA e o utilizador finalizarem o projeto, será possível exportar tudo de volta para o AutoCAD num plano 2D nativo, preservando perfeitamente todas as linhas, círculos e cores originais.
+* Escalabilidade e Visualização 3D: A base em C++ abre portas para visualizações em perspectiva (3D) de alta performance e simulações em tempo real.
+
+Cronograma e Esquema de Trabalho:
+Para executar a migração completa e implementar essas inovações robustas, desenvolvi um cronograma estruturado de 6 meses (aproximadamente 360 horas de trabalho). Proponho o seguinte roteiro de desenvolvimento:
+
+* Meses 1 e 2: Configuração da nova arquitetura (C++/Java/JS) e migração total de todas as funcionalidades atuais (alcançar a paridade com o sistema antigo sem perdas).
+* Mês 3: Desenvolvimento e integração do motor de cálculos mecânicos e de esforços (estresse).
+* Mês 4: Integração de Inteligência Artificial e desenvolvimento de um Servidor MCP (Model Context Protocol). Isso fornecerá à IA as ferramentas (endpoints) necessárias para que ela possa consumir os serviços do sistema e criar, de forma autônoma e otimizada, os postes, triângulos e suspensórios com base nas vias e fundações.
+* Mês 5: Desenvolvimento do módulo de exportação DWF completo (planos 2D com cores/linhas direto para o AutoCAD).
+* Mês 6: Polimento da visualização 3D, testes rigorosos de precisão matemática e entrega final.
+
+Condições Financeiras:
+* Tarifa: $10,00 USD por hora.
+* Dedicação estimada: 15 horas semanais.
+* Tempo projetado: 6 meses.
+
+Este modelo garante que a plataforma seja construída com o rigor técnico exigido pela engenharia de catenárias. 
+
+Diz-me se estás de acordo com esta abordagem para que possamos iniciar a migração.
+
+Cumprimentos,
+
+Diego Peña

@@ -1,0 +1,11 @@
+-- AI settings are stored inside the existing project.settings JSONB column.
+-- No schema change is required. This migration documents the expected keys:
+--
+-- {
+--   "aiProvider": "deepseek",          -- AI provider identifier
+--   "aiApiKey":   "sk-...",            -- Secret API key (set via UI)
+--   "aiModel":    "deepseek-chat"      -- Model name to use
+-- }
+--
+-- The API key is stored per-project so each project can use a different key.
+SELECT 1; -- no-op

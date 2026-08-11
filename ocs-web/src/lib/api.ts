@@ -56,6 +56,12 @@ export const api = {
       a.click();
       URL.revokeObjectURL(url);
     },
+
+    chat: (id: string, message: string) =>
+      req<{ message: string; updatedSceneData: string | null }>(
+        `/locations/${id}/chat`,
+        { method: 'POST', body: JSON.stringify({ message }) }
+      ),
   },
 };
 

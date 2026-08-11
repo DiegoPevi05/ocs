@@ -1,4 +1,8 @@
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/OcsApiApplication.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/ai/AiController.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/ai/AiService.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/ai/AiSettings.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/ai/OcsAiTools.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/AuthController.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/AuthService.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/JwtAuthenticationFilter.java

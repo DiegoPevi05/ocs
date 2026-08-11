@@ -16,6 +16,7 @@ import { TrackPanel } from '../components/TrackPanel';
 import { AnchorPointPanel } from '../components/AnchorPointPanel';
 import { AnchorPanel } from '../components/AnchorPanel';
 import { DxfImportModal } from '../components/DxfImportModal';
+import { AiChatBubble } from '../components/AiChatBubble';
 import type { DrawMode, ViewMode, SceneData, Location, TrackData, FoundationData, CantileverData, VaneData, ApiResponse, PoleData, AnchorPointData, AnchorData, CalcLocationResponse, CalcCantileverEntry, CalcVaneEntry, ProjectSettings } from '../types';
 import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
@@ -1957,6 +1958,26 @@ export default function EditorPage() {
         <DxfImportModal
           onImport={handleDxfImport}
           onClose={() => setShowDxfImport(false)}
+        />
+      )}
+
+      {/* ── AI Chat Bubble ────────────────────────────────────────────── */}
+      {locationId && (
+        <AiChatBubble
+          locationId={locationId}
+          onSceneUpdated={(updatedSceneData) => {
+            // Parse and reload the scene when the AI modifies it
+            try {
+              const newScene: SceneData = JSON.parse(updatedSceneData);
+              setCompletedTracks(newScene.tracks ?? []);
+              setPoles(newScene.poles ?? []);
+              setFoundations(newScene.foundations ?? []);
+              setCantilevers(newScene.cantilevers ?? []);
+              setVanes(newScene.vanes ?? []);
+            } catch (e) {
+              console.error('Failed to parse AI-updated sceneData', e);
+            }
+          }}
         />
       )}
     </div>

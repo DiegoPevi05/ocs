@@ -213,6 +213,8 @@ export interface SceneData {
 
 // ─── Project settings (inherited defaults for new poles, cantilevers, vanes) ───
 
+export type AiProvider = 'deepseek' | 'openai' | 'gemini' | 'claude';
+
 export interface ProjectSettings {
   catenarySystem: 'DOUBLE_WIRE' | 'SINGLE_WIRE';
   foundation: {
@@ -256,6 +258,13 @@ export interface ProjectSettings {
     height: number;              // mm, default plate height/thickness
     density: number;             // kg/m³
     fixingPointHeight: number;   // mm from pole base (used for Anchor)
+  };
+  /** AI provider settings — stored inside project.settings JSONB */
+  ai: {
+    provider: AiProvider;
+    apiKey: string;
+    model: string;
+    enabled: boolean;
   };
 }
 
@@ -302,6 +311,12 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
     height: 20,
     density: 7850,
     fixingPointHeight: 500,
+  },
+  ai: {
+    provider: 'deepseek',
+    apiKey: '',
+    model: 'deepseek-chat',
+    enabled: false,
   },
 };
 

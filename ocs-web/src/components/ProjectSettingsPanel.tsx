@@ -7,14 +7,14 @@ import { DEFAULT_PROJECT_SETTINGS } from '../types';
 
 const INPUT: CSSProperties = {
   width: '100%', padding: '6px 10px',
-  background: '#0a0e1a', border: '1px solid #1e2d45',
-  borderRadius: 4, color: '#e2e8f0', fontSize: 12,
+  background: 'var(--bg)', border: '1px solid var(--border)',
+  borderRadius: 4, color: 'var(--text)', fontSize: 12,
   outline: 'none', boxSizing: 'border-box',
 };
 
 const LABEL: CSSProperties = {
   display: 'block', fontSize: 10,
-  color: '#64748b', textTransform: 'uppercase',
+  color: 'var(--muted)', textTransform: 'uppercase',
   letterSpacing: '0.06em', marginBottom: 4,
 };
 
@@ -36,9 +36,9 @@ function Row({ children }: { children: ReactNode }) {
 function Section({ title }: { title: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0 4px' }}>
-      <div style={{ flex: 1, height: 1, background: '#1e2d45' }} />
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
       <span style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{title}</span>
-      <div style={{ flex: 1, height: 1, background: '#1e2d45' }} />
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
   );
 }
@@ -52,7 +52,15 @@ interface Props {
 }
 
 export function ProjectSettingsPanel({ settings, onSave, onClose }: Props) {
-  const [form, setForm] = useState<ProjectSettings>({ ...DEFAULT_PROJECT_SETTINGS, ...settings });
+  const [form, setForm] = useState<ProjectSettings>({
+    ...DEFAULT_PROJECT_SETTINGS,
+    ...settings,
+    pole:        { ...DEFAULT_PROJECT_SETTINGS.pole,        ...(settings?.pole        || {}) },
+    cantilever:  { ...DEFAULT_PROJECT_SETTINGS.cantilever,  ...(settings?.cantilever  || {}) },
+    vane:        { ...DEFAULT_PROJECT_SETTINGS.vane,        ...(settings?.vane        || {}) },
+    anchorPoint: { ...DEFAULT_PROJECT_SETTINGS.anchorPoint, ...(settings?.anchorPoint || {}) },
+    ai:          { ...DEFAULT_PROJECT_SETTINGS.ai,          ...(settings?.ai          || {}) },
+  });
 
   const setP = <K extends keyof ProjectSettings['pole']>(key: K, val: ProjectSettings['pole'][K]) =>
     setForm(f => ({ ...f, pole: { ...f.pole, [key]: val } }));
@@ -75,8 +83,8 @@ export function ProjectSettingsPanel({ settings, onSave, onClose }: Props) {
       <div style={{
         position: 'fixed', top: 0, right: 0, bottom: 0,
         width: 'clamp(320px, 28vw, 480px)',
-        background: '#111827',
-        borderLeft: '1px solid #1e2d45',
+        background: 'var(--surface)',
+        borderLeft: '1px solid var(--border)',
         zIndex: 201,
         display: 'flex', flexDirection: 'column',
         animation: 'settingsPanelIn 0.22s ease-out',
@@ -87,17 +95,17 @@ export function ProjectSettingsPanel({ settings, onSave, onClose }: Props) {
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '14px 18px',
-          borderBottom: '1px solid #1e2d45',
-          background: '#1c2539',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--surface2)',
           flexShrink: 0,
         }}>
           <div>
-            <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Project</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', marginTop: 2 }}>Default Settings</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Project</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>Default Settings</div>
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: '0 4px' }}
+            style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: '0 4px' }}
           >×</button>
         </div>
 
@@ -302,23 +310,23 @@ export function ProjectSettingsPanel({ settings, onSave, onClose }: Props) {
         {/* Footer */}
         <div style={{
           padding: '12px 18px',
-          borderTop: '1px solid #1e2d45',
+          borderTop: '1px solid var(--border)',
           display: 'flex', gap: 8, justifyContent: 'flex-end',
-          background: '#1c2539',
+          background: 'var(--surface2)',
           flexShrink: 0,
         }}>
           <button
             onClick={onClose}
             style={{
               padding: '7px 18px', background: 'none',
-              border: '1px solid #1e2d45', color: '#94a3b8',
+              border: '1px solid var(--border)', color: '#94a3b8',
               borderRadius: 4, cursor: 'pointer', fontSize: 13,
             }}
           >Cancel</button>
           <button
             onClick={() => onSave(form)}
             style={{
-              padding: '7px 18px', background: '#3b82f6',
+              padding: '7px 18px', background: 'var(--accent)',
               border: 'none', color: '#fff',
               borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
             }}

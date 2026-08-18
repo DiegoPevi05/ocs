@@ -88,6 +88,17 @@ export class ViewerEngine {
   private panning = false;
   private panOrigin = new THREE.Vector2();
 
+  // Simulation state
+  public simState: 'stopped' | 'playing' | 'paused' = 'stopped';
+  public simProgress: number = 0; // 0 to 1
+  public simSpeed: number = 0.001; // progress per frame
+  public simZigzag: number = 0;
+  public simCWHeight: number = 5400;
+  public chaseCamDistance: number = 8000;
+  private trainGroup?: THREE.Group;
+  private trackCurve?: THREE.CatmullRomCurve3;
+  private trackCantilevers: { c: any; progress: number }[] = [];
+
   // Bound event refs
   private _onMM: (e: MouseEvent) => void;
   private _onMD: (e: MouseEvent) => void;
@@ -117,11 +128,16 @@ export class ViewerEngine {
     this.vaneDataGroup = new THREE.Group();
     this.vaneDataGroup.name = 'vaneData';
     this.dynamicGroup = new THREE.Group();
-    this.dynamicGroup.name = 'dynamic';
-    this.rubberbandGroup = new THREE.Group();
-    this.rubberbandGroup.name = 'rubberband';
+    this.scene.add(this.dynamicGroup);
 
-    this.scene.add(this.gridGroup, this.dataGroup, this.vaneDataGroup, this.dynamicGroup, this.rubberbandGroup, this.cursorGroup);
+    this.rubberbandGroup = new THREE.Group();
+    this.scene.add(this.rubberbandGroup);
+
+    this.initTrainPlaceholder();
+
+    this.updateGrid();
+    this.onResize();
+    this.scene.add(this.gridGroup, this.dataGroup, this.vaneDataGroup, this.cursorGroup);
 
     this.labelsContainer = document.createElement('div');
     this.labelsContainer.style.cssText = 'position: absolute; top: 0; left: 0; pointer-events: none; width: 100%; height: 100%; z-index: 5; overflow: hidden;';
@@ -166,7 +182,7 @@ export class ViewerEngine {
   // ─── Scene setup ────────────────────────────────────────────────────────────
 
   private buildRenderer(): THREE.WebGLRenderer {
-    const r = new THREE.WebGLRenderer({ antialias: true });
+    const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     r.setSize(this.container.offsetWidth, this.container.offsetHeight);
     this.container.appendChild(r.domElement);
@@ -778,7 +794,29 @@ export class ViewerEngine {
         if (this.selFilter.tracks && this.dynData.completedTracks) {
           this.dynData.completedTracks.forEach((tr: any, i: number) => {
             for (let j = 1; j < tr.length; j++) {
-              checkSegment(tr[j - 1].x, tr[j - 1].z, tr[j].x, tr[j].z, 'track', i);
+              const prev = tr[j - 1], curr = tr[j];
+              if (curr.r && Math.abs(curr.r) > 1) {
+                // Sample arc segments for hover detection
+                const chordLen = Math.hypot(curr.x - prev.x, curr.z - prev.z);
+                const R = Math.abs(curr.r);
+                if (R > chordLen / 2) {
+                  const mx = (prev.x + curr.x) / 2, mz = (prev.z + curr.z) / 2;
+                  const ux = (curr.x - prev.x) / chordLen, uz = (curr.z - prev.z) / chordLen;
+                  const h = Math.sqrt(R * R - (chordLen / 2) * (chordLen / 2));
+                  const sign = curr.r > 0 ? 1 : -1;
+                  const cx = mx - uz * h * sign, cz = mz + ux * h * sign;
+                  const sa = Math.atan2(prev.z - cz, prev.x - cx);
+                  const ea = Math.atan2(curr.z - cz, curr.x - cx);
+                  const clockWise = curr.r < 0;
+                  const tmpCurve = new THREE.EllipseCurve(cx, cz, R, R, sa, ea, clockWise, 0);
+                  const arcPts = tmpCurve.getPoints(16);
+                  for (let k = 1; k < arcPts.length; k++) {
+                    checkSegment(arcPts[k - 1].x, arcPts[k - 1].y, arcPts[k].x, arcPts[k].y, 'track', i);
+                  }
+                  continue;
+                }
+              }
+              checkSegment(prev.x, prev.z, curr.x, curr.z, 'track', i);
             }
           });
         }
@@ -887,7 +925,36 @@ export class ViewerEngine {
   }
 
   private onMouseDown(e: MouseEvent): void {
-    if (this.viewMode !== '2D') return;
+    if (this.viewMode === '3D') {
+      if (e.button === 0 && this.drawMode === 'none') {
+        const rect = this.container.getBoundingClientRect();
+        const mouse = new THREE.Vector2();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        
+        const raycaster = new THREE.Raycaster();
+        raycaster.params.Line.threshold = 800; // generous tolerance for clicking track lines
+        raycaster.layers.set(2);               // track 3D lines live on layer 2
+        raycaster.setFromCamera(mouse, this.cam3D);
+        
+        const candidates: THREE.Object3D[] = [];
+        this.dynamicGroup.traverse((child) => {
+          if (child.userData?.type === 'track' && child.layers.isEnabled(2)) {
+            candidates.push(child);
+          }
+        });
+        const intersects = raycaster.intersectObjects(candidates, false);
+        const hit = intersects.length > 0 ? intersects[0] : null;
+        if (hit) {
+          const trackIdx = hit.object.userData.index;
+          this.container.dispatchEvent(new CustomEvent('viewer-select', {
+            detail: { minX: 0, maxX: 0, minZ: 0, maxZ: 0, isPoint: true, hovered: { type: 'track', index: trackIdx }, isWindowSelect: false }
+          }));
+        }
+      }
+      return;
+    }
+    
     if (e.button === 1 || e.button === 2 || (e.button === 0 && e.ctrlKey)) {
       this.panning = true;
       this.panOrigin.set(e.clientX, e.clientY);
@@ -982,17 +1049,255 @@ export class ViewerEngine {
     this.updateGrid();
   }
 
+  private initTrainPlaceholder() {
+    this.trainGroup = new THREE.Group();
+    const bodyGeo = new THREE.BoxGeometry(2500, 3500, 15000); // W=2.5m, H=3.5m, L=15m
+    bodyGeo.translate(0, 1750, 0); // Origin at bottom
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.name = 'TrainBody';
+    this.trainGroup.add(body);
+
+    const pantoGeo = new THREE.BoxGeometry(2000, 100, 100);
+    const pantoMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+    const panto = new THREE.Mesh(pantoGeo, pantoMat);
+    panto.name = 'PantographHead';
+    panto.position.set(0, 5400, 0); // ~5.4m high
+    this.trainGroup.add(panto);
+
+    this.trainGroup.visible = false;
+    this.scene.add(this.trainGroup);
+  }
+
   // ─── Render loop ─────────────────────────────────────────────────────────────
+
+  public simCameraMode: 'free' | 'chase' = 'free';
+  public chaseCamDistance: number = 8000;
 
   private loop = (): void => {
     requestAnimationFrame(this.loop);
+    
+    // Train Simulation Update
+    if (this.simState === 'playing' && this.trainGroup && this.trackCurve) {
+      this.simProgress += this.simSpeed;
+      if (this.simProgress > 1) this.simProgress = 0;
+
+      const pos = this.trackCurve.getPointAt(this.simProgress);
+      const tangent = this.trackCurve.getTangentAt(this.simProgress);
+      
+      this.trainGroup.position.copy(pos);
+      const lookAtTarget = pos.clone().add(tangent);
+      this.trainGroup.lookAt(lookAtTarget);
+      
+      // Calculate smooth contact wire height using inverse distance weighting of nearby cantilevers
+      let targetHeight = 5400;
+      if (this.dynData?.cantilevers?.length > 0) {
+          let totalWeight = 0;
+          let weightedSum = 0;
+          this.dynData.cantilevers.forEach((c: any) => {
+              const d = Math.max(1, Math.hypot(pos.x - c.x2, pos.z - (-(c.z2 ?? 0))));
+              if (d < 100000) { // Only consider cantilevers within 100m
+                  const weight = 1 / Math.pow(d, 2);
+                  weightedSum += (c.contactWireHeight ?? 5400) * weight;
+                  totalWeight += weight;
+              }
+          });
+          if (totalWeight > 0) {
+              targetHeight = weightedSum / totalWeight;
+          }
+      }
+      
+      this.simCWHeight = targetHeight;
+
+      const panto = this.trainGroup.getObjectByName('PantographHead');
+      if (panto) {
+          // Smoothly animate the pantograph up/down to match the wire height
+          panto.position.y += (targetHeight - panto.position.y) * 0.1;
+      }
+
+      // Calculate real-time zigzag (lateral offset of contact wire from track center)
+      this.simZigzag = 0;
+      let foundZigzag = false;
+      let minZzDist = Infinity;
+
+      if (this.dynData?.vanes?.length > 0) {
+        this.dynData.vanes.forEach((v: any) => {
+          const Ax = v.x1, Az = v.z1;
+          const Bx = v.x2, Bz = v.z2;
+          const ABx = Bx - Ax, ABz = Bz - Az;
+          
+          const denom = ABx * tangent.x + ABz * tangent.z;
+          if (Math.abs(denom) > 1e-6) {
+            const num = -((Ax - pos.x) * tangent.x + (Az - pos.z) * tangent.z);
+            const t = num / denom;
+            
+            // Allow a tiny margin for t in case we are exactly at the cantilever
+            if (t >= -0.01 && t <= 1.01) {
+              const Cx = Ax + t * ABx;
+              const Cz = Az + t * ABz;
+              
+              // Signed distance from pantograph center to contact point
+              // Normal vector N = (-tangent.z, tangent.x)
+              const dx = Cx - pos.x;
+              const dz = Cz - pos.z;
+              const signedDist = dx * (-tangent.z) + dz * tangent.x;
+              
+              if (Math.abs(signedDist) < minZzDist && Math.abs(signedDist) < 2000) {
+                minZzDist = Math.abs(signedDist);
+                this.simZigzag = signedDist;
+                foundZigzag = true;
+              }
+            }
+          }
+        });
+      }
+
+      if (!foundZigzag) {
+        if (this.trackCantilevers.length >= 2) {
+          let behind = this.trackCantilevers[0];
+          let ahead = this.trackCantilevers[this.trackCantilevers.length - 1];
+          
+          for (let i = 0; i < this.trackCantilevers.length - 1; i++) {
+            if (this.trackCantilevers[i].progress <= this.simProgress && this.trackCantilevers[i+1].progress >= this.simProgress) {
+              behind = this.trackCantilevers[i];
+              ahead = this.trackCantilevers[i+1];
+              break;
+            }
+          }
+          
+          const progSpan = ahead.progress - behind.progress;
+          if (progSpan > 0) {
+            const t = (this.simProgress - behind.progress) / progSpan;
+            const zzBehind = behind.c.zigzag ?? 250;
+            const zzAhead = ahead.c.zigzag ?? 250;
+            this.simZigzag = zzBehind + (zzAhead - zzBehind) * t;
+          } else {
+            this.simZigzag = behind.c.zigzag ?? 250;
+          }
+        } else if (this.trackCantilevers.length === 1) {
+          this.simZigzag = this.trackCantilevers[0].c.zigzag ?? 250;
+        }
+      }
+
+      if (this.simCameraMode === 'chase' && this.viewMode === '3D') {
+          const offset = tangent.clone().multiplyScalar(-this.chaseCamDistance);
+          offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
+          const camPos = pos.clone().add(offset);
+          this.cam3D.position.lerp(camPos, 0.12);
+
+          const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
+          this.controls.target.lerp(camTarget, 0.12);
+      }
+    }
+
     if (this.viewMode === '3D') {
       this.controls.update();
     }
+
     this.updateLabels();
     this.renderer.render(this.scene, this.viewMode === '2D' ? this.cam2D : this.cam3D);
   };
 
+  // ─── Simulation Controls ─────────────────────────────────────────────────────
+
+  public setSimulationState(state: 'playing' | 'paused' | 'stopped') {
+    this.simState = state;
+    if (!this.trainGroup) return;
+
+    if (state === 'stopped') {
+      this.trainGroup.visible = false;
+      this.simProgress = 0;
+      this.trackCurve = undefined;
+    } else {
+      if (!this.trackCurve) {
+        let activeTrackPoints = null;
+
+        if (this.dynData?.selectedTracks?.length > 0) {
+           const idx = this.dynData.selectedTracks[0];
+           activeTrackPoints = this.dynData.completedTracks?.[idx];
+        } else if (this.dynData?.completedTracks?.length > 0) {
+           activeTrackPoints = this.dynData.completedTracks[0];
+        }
+
+        if (!activeTrackPoints && this.dynData?.trackPoints?.length >= 2) {
+           activeTrackPoints = this.dynData.trackPoints;
+        }
+
+        if (activeTrackPoints && activeTrackPoints.length >= 2) {
+          // Build the simulation curve using the same arc-sampling logic as rendering
+          const pts = this._buildSimTrackPts(activeTrackPoints);
+          if (pts.length >= 2) {
+            this.trackCurve = new THREE.CatmullRomCurve3(pts, false, 'chordal');
+
+            // Map cantilevers to track progress for accurate zigzag along curves
+            this.trackCantilevers = [];
+            if (this.dynData?.cantilevers) {
+              const lut = this.trackCurve.getSpacedPoints(200); // 200 samples along track
+              this.dynData.cantilevers.forEach((c: any) => {
+                const cx = c.x2 ?? c.x2raw ?? c.x1;
+                const cz = c.z2 ?? c.z2raw ?? c.z1;
+                let minDist = Infinity;
+                let minIdx = -1;
+                for (let i = 0; i < lut.length; i++) {
+                  const d = Math.hypot(cx - lut[i].x, cz - lut[i].z);
+                  if (d < minDist) { minDist = d; minIdx = i; }
+                }
+                if (minDist < 50000) { // Only consider cantilevers within 50m of this track
+                  this.trackCantilevers.push({ c, progress: minIdx / (lut.length - 1) });
+                }
+              });
+              this.trackCantilevers.sort((a, b) => a.progress - b.progress);
+            }
+          }
+        }
+      }
+
+      if (this.trackCurve) {
+        this.trainGroup.visible = true;
+      } else {
+        this.trainGroup.visible = false;
+        this.simState = 'stopped';
+      }
+    }
+  }
+
+  /** Build 3D points for the simulation curve, sampling arcs like the renderer does. */
+  private _buildSimTrackPts(trackArr: { x: number; z: number; y?: number; r?: number }[]): THREE.Vector3[] {
+    const pts: THREE.Vector3[] = [];
+    trackArr.forEach((curr, i) => {
+      if (i === 0 || !curr.r) {
+        pts.push(new THREE.Vector3(curr.x, curr.y || 0, curr.z));
+        return;
+      }
+      const prev = trackArr[i - 1];
+      const d = Math.hypot(curr.x - prev.x, curr.z - prev.z);
+      const R = Math.abs(curr.r);
+      if (R > d / 2 && R > 1) {
+        const mx = (prev.x + curr.x) / 2;
+        const mz = (prev.z + curr.z) / 2;
+        const ux = (curr.x - prev.x) / d;
+        const uz = (curr.z - prev.z) / d;
+        const h = Math.sqrt(R * R - (d / 2) * (d / 2));
+        const sign = curr.r > 0 ? 1 : -1;
+        const cx = mx - uz * h * sign;
+        const cz = mz + ux * h * sign;
+        const startA = Math.atan2(prev.z - cz, prev.x - cx);
+        const endA = Math.atan2(curr.z - cz, curr.x - cx);
+        const clockWise = curr.r < 0;
+        const curve = new THREE.EllipseCurve(cx, cz, R, R, startA, endA, clockWise, 0);
+        const arcPts = curve.getPoints(24);
+        const prevY = prev.y || 0;
+        const currY = curr.y || 0;
+        for (let j = 1; j < arcPts.length; j++) {
+          const fraction = j / (arcPts.length - 1);
+          pts.push(new THREE.Vector3(arcPts[j].x, prevY + fraction * (currY - prevY), arcPts[j].y));
+        }
+      } else {
+        pts.push(new THREE.Vector3(curr.x, curr.y || 0, curr.z));
+      }
+    });
+    return pts;
+  }
 
   // ─── Data loading ─────────────────────────────────────────────────────────────
 
@@ -1463,7 +1768,15 @@ export class ViewerEngine {
   }
 
   public setDynamicGeometry(data: any): void {
+    const oldSel = this.dynData?.selectedTracks?.[0];
     this.dynData = data;
+    const newSel = this.dynData?.selectedTracks?.[0];
+
+    if (oldSel !== newSel && this.simState !== 'stopped') {
+        this.trackCurve = undefined;
+        this.setSimulationState(this.simState);
+    }
+
     this._renderDynamic();
   }
 
@@ -1534,11 +1847,13 @@ export class ViewerEngine {
       // 2D (layer 1): editor Z
       const line2d = new THREE.Line(new THREE.BufferGeometry().setFromPoints(buildTrackPts(trackArr, 1)), new THREE.LineBasicMaterial({ color: trackColor }));
       line2d.layers.set(1);
+      line2d.userData = { type: 'track', index: trackIdx };
       this.dynamicGroup.add(line2d);
 
       // 3D (layer 2): use un-negated scene Z
       const line3d = new THREE.Line(new THREE.BufferGeometry().setFromPoints(buildTrackPts(trackArr, 1)), new THREE.LineBasicMaterial({ color: trackColor }));
       line3d.layers.set(2);
+      line3d.userData = { type: 'track', index: trackIdx };
       this.dynamicGroup.add(line3d);
 
       // Node dots
@@ -1877,13 +2192,15 @@ export class ViewerEngine {
 
     // Scene Z now equals editor Z in both 2D and 3D — no negation needed.
     const sz = (z: number) => z;
+    const isFreeCam = this.viewMode === '3D' && this.simState !== 'stopped' && this.simCameraMode === 'free';
 
     this.dynData.poles.forEach(p => {
       if (p.label) addLbl(`${p.label} (H: ${Math.round(p.h || 3000)})`, new THREE.Vector3(p.x + 400, (p.y || 0) + (p.h || 3000) + 200, sz(p.z || 0)));
     });
 
-    if (this.dynData.completedTracks) {
-      this.dynData.completedTracks.forEach(tr => {
+    if (!isFreeCam) {
+      if (this.dynData.completedTracks) {
+        this.dynData.completedTracks.forEach(tr => {
         if (tr.length > 0 && tr[0].label) {
           const mid = Math.floor(tr.length / 2);
           const p = tr[mid];
@@ -2002,6 +2319,35 @@ export class ViewerEngine {
         });
       }
     }
+    } // End of !isFreeCam block
+
+    // Pantograph zigzag and CW height label — attached to the pantograph during simulation
+    if (this.simState !== 'stopped' && this.trainGroup?.visible && this.viewMode === '3D') {
+      const panto = this.trainGroup.getObjectByName('PantographHead');
+      if (panto) {
+        const worldPos = new THREE.Vector3();
+        panto.getWorldPosition(worldPos);
+        // Offset the label slightly above and to the right of the pantograph
+        worldPos.y += 400;
+
+        const clone = worldPos.clone();
+        clone.project(cam);
+        if (clone.z > -1 && clone.z < 1) {
+          const x = (clone.x * .5 + .5) * this.container.offsetWidth;
+          const y = (clone.y * -.5 + .5) * this.container.offsetHeight;
+          const div = document.createElement('div');
+          const side = this.simZigzag > 0 ? 'R' : (this.simZigzag < 0 ? 'L' : '');
+          div.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+              <div><span style="opacity:.7;font-size:10px">Zigzag:</span> <b>${Math.abs(this.simZigzag).toFixed(0)}</b><span style="opacity:.7;font-size:10px"> mm ${side}</span></div>
+              <div><span style="opacity:.7;font-size:10px">CW Height:</span> <b>${this.simCWHeight.toFixed(0)}</b><span style="opacity:.7;font-size:10px"> mm</span></div>
+            </div>
+          `;
+          div.style.cssText = `position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-100%);background:rgba(180,83,9,0.9);border:1px solid rgba(245,158,11,0.7);color:#fef3c7;padding:4px 10px;border-radius:6px;font-size:12px;font-family:monospace;white-space:nowrap;pointer-events:none;letter-spacing:-0.3px;`;
+          this.labelsContainer.appendChild(div);
+        }
+      }
+    }
   }
 
   // ─── Camera fit ───────────────────────────────────────────────────────────────
@@ -2069,6 +2415,7 @@ export class ViewerEngine {
     this.viewMode = mode;
 
     if (mode === '3D') {
+      this.scene.background = new THREE.Color('#ffffff');
       this.controls.enabled = true;
       this.cursorGroup.visible = false;
       this.gridGroup.visible = false;
@@ -2076,10 +2423,10 @@ export class ViewerEngine {
       this.container.style.cursor = '';
       // Disable our wheel/mousedown for pan — OrbitControls takes over
       this.container.removeEventListener('wheel', this._onWH);
-      this.container.removeEventListener('mousedown', this._onMD);
       this._renderDynamic();
       this.fitCamera();
     } else {
+      this.scene.background = new THREE.Color(BG_COLOR);
       this.controls.enabled = false;
       this.gridGroup.visible = true;
       this.container.style.cursor = '';
@@ -2280,5 +2627,46 @@ export class ViewerEngine {
     if (this.coordsEl?.parentNode) {
       this.coordsEl.parentNode.removeChild(this.coordsEl);
     }
+  }
+
+  public async takeScreenshot(): Promise<string> {
+    this.renderer.render(this.scene, this.viewMode === '2D' ? this.cam2D : this.cam3D);
+    
+    // Create a composite canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = this.renderer.domElement.width;
+    canvas.height = this.renderer.domElement.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return this.renderer.domElement.toDataURL('image/png');
+
+    // Draw the 3D scene
+    ctx.drawImage(this.renderer.domElement, 0, 0);
+
+    // Render HTML labels via SVG foreignObject
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">
+        <foreignObject width="100%" height="100%">
+          <div xmlns="http://www.w3.org/1999/xhtml" style="width: 100%; height: 100%; position: relative;">
+            ${this.labelsContainer.innerHTML}
+          </div>
+        </foreignObject>
+      </svg>
+    `;
+    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.src = url;
+    });
   }
 }

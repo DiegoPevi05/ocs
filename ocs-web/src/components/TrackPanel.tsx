@@ -6,8 +6,8 @@ import { DEFAULT_PROJECT_SETTINGS } from '../types';
 // ─── Shared style tokens ──────────────────────────────────────────────────────
 
 const INPUT: CSSProperties = {
-  width: '100%', padding: '6px 8px', background: '#0f172a',
-  border: '1px solid #1e2d45', color: '#f8fafc',
+  width: '100%', padding: '6px 8px', background: 'var(--bg)',
+  border: '1px solid var(--border)', color: '#f8fafc',
   borderRadius: 4, outline: 'none', fontSize: 13,
   transition: 'border-color 0.15s',
   fontFamily: 'monospace'
@@ -23,7 +23,7 @@ const ROW: CSSProperties = { display: 'flex', gap: 12, marginBottom: 12 };
 function Field({ label, children, hint }: { label: ReactNode, children: ReactNode, hint?: string }) {
   return (
     <div style={{ flex: 1 }}>
-      <label style={LABEL}>{label} {hint && <span style={{ color: '#64748b', fontSize: 10, textTransform: 'none', fontWeight: 400 }}>({hint})</span>}</label>
+      <label style={LABEL}>{label} {hint && <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'none', fontWeight: 400 }}>({hint})</span>}</label>
       {children}
     </div>
   );
@@ -69,9 +69,9 @@ export function TrackPanel({ track, settings, onSave, onClose }: Props) {
       <div style={{
         position: 'fixed', top: 0, right: 0, bottom: minimized ? 'auto' : 0,
         width: 'clamp(280px, 25vw, 420px)',
-        background: '#111827',
-        borderLeft: '1px solid #1e2d45',
-        borderBottom: minimized ? '1px solid #1e2d45' : 'none',
+        background: 'var(--surface)',
+        borderLeft: '1px solid var(--border)',
+        borderBottom: minimized ? '1px solid var(--border)' : 'none',
         zIndex: 201,
         display: 'flex', flexDirection: 'column',
         animation: 'trackPanelIn 0.22s ease-out',
@@ -83,15 +83,15 @@ export function TrackPanel({ track, settings, onSave, onClose }: Props) {
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '14px 18px',
-          borderBottom: minimized ? 'none' : '1px solid #1e2d45',
-          background: '#1c2539',
+          borderBottom: minimized ? 'none' : '1px solid var(--border)',
+          background: 'var(--surface2)',
           flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
               onClick={() => setMinimized(!minimized)}
               style={{
-                background: 'none', border: 'none', color: '#64748b',
+                background: 'none', border: 'none', color: 'var(--muted)',
                 cursor: 'pointer', display: 'flex', alignItems: 'center',
                 transition: 'transform 0.2s',
                 transform: minimized ? 'rotate(-90deg)' : 'rotate(0deg)',
@@ -103,15 +103,15 @@ export function TrackPanel({ track, settings, onSave, onClose }: Props) {
               </svg>
             </button>
             <div>
-                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Track</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', marginTop: 2 }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Track</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>
                 {form.label || <span style={{ color: '#475569', fontStyle: 'italic' }}>unnamed</span>}
                 </div>
             </div>
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: '0 4px' }}
+            style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: '0 4px' }}
           >×</button>
         </div>
 
@@ -133,7 +133,7 @@ export function TrackPanel({ track, settings, onSave, onClose }: Props) {
             <div style={{ ...LABEL, marginBottom: 10 }}>Track Points Elevations</div>
             {form.points.map((p, i) => (
               <div key={i} style={{ ...ROW, alignItems: 'center', marginBottom: 8, gap: 12 }}>
-                <div style={{ fontSize: 12, color: '#64748b', width: 80 }}>Point {i + 1}:</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', width: 80 }}>Point {i + 1}:</div>
                 <Field label={`Y Height (mm)`}>
                   <input
                     type="number"
@@ -153,23 +153,23 @@ export function TrackPanel({ track, settings, onSave, onClose }: Props) {
         {!minimized && (
             <div style={{
             padding: '12px 18px',
-            borderTop: '1px solid #1e2d45',
+            borderTop: '1px solid var(--border)',
             display: 'flex', gap: 8, justifyContent: 'flex-end',
-            background: '#1c2539',
+            background: 'var(--surface2)',
             flexShrink: 0,
             }}>
           <button
             onClick={onClose}
             style={{
               padding: '7px 18px', background: 'none',
-              border: '1px solid #1e2d45', color: '#94a3b8',
+              border: '1px solid var(--border)', color: '#94a3b8',
               borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
             }}
           >Cancel</button>
           <button
             onClick={() => onSave(form)}
             style={{
-              padding: '7px 18px', background: '#3b82f6',
+              padding: '7px 18px', background: 'var(--accent)',
               border: 'none', color: '#fff',
               borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
             }}

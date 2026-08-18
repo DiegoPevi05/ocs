@@ -5,6 +5,7 @@
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/ai/OcsAiTools.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/AuthController.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/AuthService.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/DatabaseSeeder.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/JwtAuthenticationFilter.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/JwtService.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/auth/LoginRequest.java
@@ -18,6 +19,10 @@
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/locations/Location.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/locations/LocationController.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/locations/LocationRepository.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/platform/PlatformSettings.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/platform/PlatformSettingsController.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/platform/PlatformSettingsRepository.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/platform/PlatformSettingsService.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/poles/Pole.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/poles/PoleRepository.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/projects/Project.java
@@ -33,6 +38,8 @@
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/tracks/TrackRepository.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/Role.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/User.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/UserController.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/UserRepository.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/UserService.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/vanes/Vane.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/vanes/VaneRepository.java

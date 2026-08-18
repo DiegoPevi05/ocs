@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import ProjectPage from './pages/ProjectPage';
 import EditorPage from './pages/EditorPage';
+import LoginPage from './pages/LoginPage';
+import UsersPage from './pages/UsersPage';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -11,6 +13,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/users" element={<UsersPage />} />
         <Route path="/projects/:projectId" element={<ProjectPage />} />
         <Route path="/editor/:locationId" element={<EditorPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

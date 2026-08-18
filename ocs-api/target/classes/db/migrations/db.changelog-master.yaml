@@ -19,3 +19,5 @@ databaseChangeLog:
       file: db/migrations/v0009_vane_lifting_start_distance.sql
   - include:
       file: db/migrations/v0010_project_ai_settings.sql
+  - include:
+      file: db/migrations/v0011_platform_settings.sql

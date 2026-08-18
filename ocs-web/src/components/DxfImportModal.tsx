@@ -198,7 +198,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
       background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)',
     }}>
       <div style={{
-        background: 'linear-gradient(145deg, #0f172a 0%, #1e293b 100%)',
+        background: 'linear-gradient(145deg, var(--bg) 0%, #1e293b 100%)',
         border: '1px solid rgba(148,163,184,0.15)',
         borderRadius: 16, width: '92vw', maxWidth: 900,
         maxHeight: '90vh', display: 'flex', flexDirection: 'column',
@@ -212,7 +212,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
         }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+            background: 'linear-gradient(135deg, var(--accent), #6366f1)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
@@ -220,17 +220,17 @@ export function DxfImportModal({ onImport, onClose }: Props) {
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 16, color: '#f1f5f9' }}>Import DXF</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginTop: 1 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
               AutoCAD DXF — lines and polylines become tracks, points become foundations
             </div>
           </div>
           <button onClick={onClose} style={{
             marginLeft: 'auto', background: 'none', border: 'none',
-            color: '#64748b', cursor: 'pointer', borderRadius: 8, padding: 6,
+            color: 'var(--muted)', cursor: 'pointer', borderRadius: 8, padding: 6,
             display: 'flex', alignItems: 'center', transition: 'color 0.15s',
           }}
             onMouseEnter={e => (e.currentTarget.style.color = '#f1f5f9')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
           >
             <X size={18} />
           </button>
@@ -245,7 +245,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
             onDrop={onDrop}
             onClick={() => fileRef.current?.click()}
             style={{
-              border: `2px dashed ${dragging ? '#3b82f6' : (hasContent ? '#22c55e55' : 'rgba(148,163,184,0.25)')}`,
+              border: `2px dashed ${dragging ? 'var(--accent)' : (hasContent ? 'var(--success)55' : 'rgba(148,163,184,0.25)')}`,
               borderRadius: 12, padding: '20px 24px',
               display: 'flex', alignItems: 'center', gap: 16,
               cursor: 'pointer', transition: 'all 0.2s',
@@ -255,20 +255,20 @@ export function DxfImportModal({ onImport, onClose }: Props) {
             <input ref={fileRef} type="file" accept=".dxf" style={{ display: 'none' }} onChange={onFileChange} />
             {hasContent ? (
               <>
-                <CheckCircle2 size={28} color="#22c55e" />
+                <CheckCircle2 size={28} color="var(--success)" />
                 <div>
                   <div style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 14 }}>{fileName}</div>
-                  <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+                  <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 2 }}>
                     {parsed!.tracks.length} line/polyline entities · {parsed!.foundations.length} points
                     · Units: <span style={{ color: '#94a3b8' }}>{parsed!.units}</span>
                     · Scale: <span style={{ color: '#94a3b8' }}>{parsed!.scale} mm/unit</span>
                   </div>
                 </div>
-                <div style={{ marginLeft: 'auto', fontSize: 12, color: '#3b82f6' }}>Click to replace</div>
+                <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--accent)' }}>Click to replace</div>
               </>
             ) : (
               <>
-                <FileText size={28} color="#64748b" />
+                <FileText size={28} color="var(--muted)" />
                 <div>
                   <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 14 }}>
                     Drop a .dxf file here, or click to browse
@@ -298,7 +298,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
               background: 'rgba(148,163,184,0.06)', borderRadius: 10,
               padding: '12px 16px', border: '1px solid rgba(148,163,184,0.1)',
             }}>
-              <Layers size={16} color="#64748b" />
+              <Layers size={16} color="var(--muted)" />
               <span style={{ color: '#94a3b8', fontSize: 13 }}>Scale (mm per DXF unit)</span>
               <input
                 type="number" min={0.001} step="any"
@@ -345,7 +345,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
               {/* Bulk actions */}
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
-                fontSize: 12, color: '#64748b',
+                fontSize: 12, color: 'var(--muted)',
               }}>
                 <span>Bulk set all:</span>
                 {(['track', 'foundation', 'skip'] as const).map(cls => (
@@ -376,7 +376,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
                   gridTemplateColumns: '36px 1fr 110px 130px 60px 70px',
                   padding: '8px 14px',
                   background: 'rgba(148,163,184,0.06)',
-                  fontSize: 11, color: '#64748b', fontWeight: 600,
+                  fontSize: 11, color: 'var(--muted)', fontWeight: 600,
                   textTransform: 'uppercase', letterSpacing: '0.06em',
                   borderBottom: '1px solid rgba(148,163,184,0.1)',
                 }}>
@@ -402,7 +402,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
                     {/* Enable toggle */}
                     <button onClick={() => toggleRow(row.id)} style={{
                       background: 'none', border: 'none', cursor: 'pointer',
-                      color: row.enabled ? '#22c55e' : '#475569', display: 'flex',
+                      color: row.enabled ? 'var(--success)' : '#475569', display: 'flex',
                     }}>
                       {row.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                     </button>
@@ -413,14 +413,14 @@ export function DxfImportModal({ onImport, onClose }: Props) {
                       onChange={e => setRowLabel(row.id, e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.12)',
-                        borderRadius: 5, color: '#e2e8f0', fontSize: 12, padding: '3px 7px',
+                        borderRadius: 5, color: 'var(--text)', fontSize: 12, padding: '3px 7px',
                         outline: 'none', width: '90%',
                       }}
                     />
 
                     {/* Layer */}
                     <span style={{
-                      fontSize: 11, color: '#64748b',
+                      fontSize: 11, color: 'var(--muted)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       paddingRight: 8,
                     }}>{row.layer}</span>
@@ -434,7 +434,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
                           appearance: 'none', WebkitAppearance: 'none',
                           background: CLASS_COLORS[row.classification],
                           border: '1px solid rgba(148,163,184,0.18)',
-                          borderRadius: 6, color: '#e2e8f0', fontSize: 12,
+                          borderRadius: 6, color: 'var(--text)', fontSize: 12,
                           padding: '3px 24px 3px 8px', cursor: 'pointer',
                           outline: 'none', width: '100%',
                         }}
@@ -443,7 +443,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
                         <option value="foundation">Foundation</option>
                         <option value="skip">Skip</option>
                       </select>
-                      <ChevronDown size={12} color="#64748b" style={{ position: 'absolute', right: 6, pointerEvents: 'none' }} />
+                      <ChevronDown size={12} color="var(--muted)" style={{ position: 'absolute', right: 6, pointerEvents: 'none' }} />
                     </div>
 
                     {/* Point count */}
@@ -453,7 +453,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
 
                     {/* Entity type badge */}
                     <span style={{
-                      fontSize: 10, color: '#64748b',
+                      fontSize: 10, color: 'var(--muted)',
                       background: 'rgba(148,163,184,0.08)',
                       borderRadius: 4, padding: '1px 5px',
                       display: 'inline-block',
@@ -469,7 +469,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
           {hasContent && rows.length === 0 && (
             <div style={{
               textAlign: 'center', padding: '32px 0',
-              color: '#64748b', fontSize: 14,
+              color: 'var(--muted)', fontSize: 14,
             }}>
               No importable entities found in this DXF file.<br />
               <span style={{ fontSize: 12, color: '#475569' }}>
@@ -486,9 +486,9 @@ export function DxfImportModal({ onImport, onClose }: Props) {
           background: 'rgba(0,0,0,0.2)',
         }}>
           {hasContent && (
-            <div style={{ fontSize: 12, color: '#64748b' }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
               Will import:&nbsp;
-              <span style={{ color: '#3b82f6', fontWeight: 600 }}>{trackCount} track{trackCount !== 1 ? 's' : ''}</span>
+              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{trackCount} track{trackCount !== 1 ? 's' : ''}</span>
               &nbsp;and&nbsp;
               <span style={{ color: '#b45309', fontWeight: 600 }}>{foundCount} foundation{foundCount !== 1 ? 's' : ''}</span>
             </div>
@@ -511,7 +511,7 @@ export function DxfImportModal({ onImport, onClose }: Props) {
               style={{
                 padding: '8px 20px', borderRadius: 8,
                 background: (hasContent && (trackCount > 0 || foundCount > 0))
-                  ? 'linear-gradient(135deg, #3b82f6, #6366f1)'
+                  ? 'linear-gradient(135deg, var(--accent), #6366f1)'
                   : 'rgba(148,163,184,0.1)',
                 border: 'none',
                 color: (hasContent && (trackCount > 0 || foundCount > 0)) ? '#fff' : '#475569',

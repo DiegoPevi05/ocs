@@ -338,8 +338,8 @@ export default function App() {
               />
               {drawMode === 'none' && viewMode === '2D' && (
                 <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '8px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, animation: 'fadeInDown 0.2s ease-out', fontSize: 11 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Tracks</label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Poles</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} /> Tracks</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} /> Poles</label>
                 </div>
               )}
             </div>
@@ -363,12 +363,12 @@ export default function App() {
                   <button
                     className={`tool-btn ${trackMode === 'rect' ? 'tool-btn--active' : ''}`}
                     onClick={(e) => { e.stopPropagation(); setTrackMode('rect'); }}
-                    style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'rect' ? '#3b82f6' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}
+                    style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'rect' ? 'var(--accent)' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}
                   >Rect</button>
                   <button
                     className={`tool-btn ${trackMode === 'poly' ? 'tool-btn--active' : ''}`}
                     onClick={(e) => { e.stopPropagation(); setTrackMode('poly'); }}
-                    style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'poly' ? '#3b82f6' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}
+                    style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'poly' ? 'var(--accent)' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}
                   >Polyline</button>
                 </div>
               )}
@@ -414,9 +414,9 @@ export default function App() {
           {/* Legend */}
           <div className="toolbar-legend">
             <div className="toolbar-legend__title">Legend</div>
-            <LegendItem color="#3b82f6" label="Railway Track" />
-            <LegendItem color="#ef4444" label="Catenary Pole" />
-            <LegendItem color="#22c55e" label="Cantilever" />
+            <LegendItem color="var(--accent)" label="Railway Track" />
+            <LegendItem color="var(--danger)" label="Catenary Pole" />
+            <LegendItem color="var(--success)" label="Cantilever" />
             <LegendItem color="#eab308" label="Vane" />
           </div>
         </aside>
@@ -447,11 +447,11 @@ export default function App() {
           {/* Reference Widget overlay */}
           <div style={{ position: 'absolute', bottom: 20, right: 20, background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(51,65,85,0.5)', color: '#94a3b8', padding: '10px 14px', borderRadius: 6, zIndex: 50, fontFamily: 'monospace', fontSize: 13, userSelect: 'none' }}>
             <div style={{ paddingBottom: 6, borderBottom: '1px solid rgba(51,65,85,0.5)', marginBottom: 6, fontWeight: 600 }}>Axis View</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: '#ef4444' }}>X</strong>  Rigth(Pan)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: '#3b82f6' }}>Z</strong>  {viewMode === '2D' ? 'Up(Ver)' : 'Front/Back'}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: 'var(--danger)' }}>X</strong>  Rigth(Pan)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: 'var(--accent)' }}>Z</strong>  {viewMode === '2D' ? 'Up(Ver)' : 'Front/Back'}</div>
             <div style={{ marginTop: 12, display: 'flex', alignItems: 'center' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={autoSnap} onChange={e => setAutoSnap(e.target.checked)} style={{ cursor: 'pointer', accentColor: '#3b82f6' }} />
+                <input type="checkbox" checked={autoSnap} onChange={e => setAutoSnap(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--accent)' }} />
                 <span style={{ fontSize: 12 }}>Auto-Snap Grid</span>
               </label>
             </div>
@@ -463,7 +463,7 @@ export default function App() {
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
               <h3 style={{ marginTop: 0 }}>Configure Pole</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Name / Label <span style={{ color: '#ef4444' }}>*</span></label>
+              <label style={{ display: 'block', marginTop: 12 }}>Name / Label <span style={{ color: 'var(--danger)' }}>*</span></label>
               <input id="pole-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
 
               <label style={{ display: 'block', marginTop: 12 }}>Height (mm)</label>
@@ -471,7 +471,7 @@ export default function App() {
 
               <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
                 <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setPoleModal(null)}>Cancel</button>
-                <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
+                <button style={{ padding: '6px 16px', background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
                   const lbl = (document.getElementById('pole-label-input') as HTMLInputElement).value.trim();
                   if (!lbl) { alert('Label is required'); return; }
                   const hgt = parseFloat((document.getElementById('pole-height-input') as HTMLInputElement).value) || 3000;
@@ -487,12 +487,12 @@ export default function App() {
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
               <h3 style={{ marginTop: 0 }}>Configure Track</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: 'var(--danger)' }}>*</span></label>
               <input id="track-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
 
               <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
                 <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setTrackModal(null)}>Cancel</button>
-                <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
+                <button style={{ padding: '6px 16px', background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
                   const lbl = (document.getElementById('track-label-input') as HTMLInputElement).value.trim();
                   if (!lbl) { alert('Label is required'); return; }
                   const finalTrack = trackModal.map(t => ({ ...t, label: lbl }));
@@ -508,7 +508,7 @@ export default function App() {
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ background: '#1e293b', padding: 24, borderRadius: 8, color: '#f8fafc', width: 300, border: '1px solid #334155' }}>
               <h3 style={{ marginTop: 0 }}>Configure Cantilever</h3>
-              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+              <label style={{ display: 'block', marginTop: 12 }}>Label <span style={{ color: 'var(--danger)' }}>*</span></label>
               <input id="cantilever-label-input" style={{ width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 }} autoFocus />
               <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
                 <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setCantileverModal(null)}>Cancel</button>

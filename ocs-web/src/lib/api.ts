@@ -4,10 +4,23 @@ import type { Location, Project, ProjectSettings, SceneData } from '../types';
 const BASE = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api`;
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('ocs_token');
+  const headers: HeadersInit = { 'Content-Type': 'application/json', ...opts?.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...opts?.headers },
+    headers,
     ...opts,
   });
+
+  if ((res.status === 401 || res.status === 403) && path !== '/auth/login') {
+    localStorage.removeItem('ocs_token');
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
+
   if (!res.ok) throw new Error(`${opts?.method ?? 'GET'} ${path} → ${res.status}`);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -63,6 +76,19 @@ export const api = {
         { method: 'POST', body: JSON.stringify({ message }) }
       ),
   },
+
+  // ─── Auth & Users ───────────────────────────────────────────────────────────
+
+  auth: {
+    login: (email: string, password: string) =>
+      req<{ token: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  },
+
+  users: {
+    list: () => req<any[]>('/users'),
+    create: (data: any) => req<any>('/users', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: string) => req<void>(`/users/${id}`, { method: 'DELETE' }),
+  },
 };
 
 /** Parse sceneData from location (it's stored as a JSON string inside the jsonb column) */
@@ -88,6 +114,7 @@ export function parseProjectSettings(project: Project): ProjectSettings | null {
     pole: { ...DEFAULT_PROJECT_SETTINGS.pole, ...(parsed.pole || {}) },
     cantilever: { ...DEFAULT_PROJECT_SETTINGS.cantilever, ...(parsed.cantilever || {}) },
     vane: { ...DEFAULT_PROJECT_SETTINGS.vane, ...(parsed.vane || {}) },
-    anchorPoint: { ...DEFAULT_PROJECT_SETTINGS.anchorPoint, ...(parsed.anchorPoint || {}) }
+    anchorPoint: { ...DEFAULT_PROJECT_SETTINGS.anchorPoint, ...(parsed.anchorPoint || {}) },
+    ai: { ...DEFAULT_PROJECT_SETTINGS.ai, ...(parsed.ai || {}) },
   };
 }

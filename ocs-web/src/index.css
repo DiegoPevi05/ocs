@@ -9,17 +9,27 @@
 
 /* ─── Design tokens ─────────────────────────────────────────────────────── */
 :root {
-  --bg: #0a0e1a;
-  --surface: #111827;
-  --surface2: #1c2539;
-  --border: #1e2d45;
-  --accent: #3b82f6;
-  --accent-glow: rgba(59, 130, 246, 0.18);
-  --text: #e2e8f0;
-  --muted: #64748b;
-  --success: #22c55e;
-  --danger: #ef4444;
+  --bg: var(--color-white);
+  --surface: var(--color-secondary);
+  --surface2: var(--color-gray-light);
+  --border: #cbd5e1;
+  --accent: var(--color-primary);
+  --accent-glow: rgba(46, 65, 86, 0.18);
+  --text: var(--color-primary-dark);
+  --muted: var(--color-body);
+  --success: var(--success);
+  --danger: var(--color-danger-fusion);
   --font: 'Inter', system-ui, sans-serif;
+
+  /* Theme port from fusion_catenary */
+  --color-primary: #2E4156;
+  --color-primary-dark: #1A2D42;
+  --color-secondary: #F3F7FF;
+  --color-secondary-dark: #2E4156;
+  --color-body: #5C6C7B;
+  --color-gray-light: #E0E0E0;
+  --color-white: #FFFFFF;
+  --color-danger-fusion: #EF4444;
 }
 
 body {
@@ -236,7 +246,7 @@ body {
 .ocs-canvas-wrap {
   position: relative;
   overflow: hidden;
-  background: #0f172a;
+  background: var(--bg);
 }
 
 .ocs-canvas {
@@ -315,6 +325,162 @@ body {
   }
 }
 
+/* ─── Ported Components from fusion_catenary ────────────────────────────── */
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  gap: 16px;
+  justify-content: center;
+  align-items: center;
+  border: 3px solid transparent;
+  border-radius: 8px;
+  transition: all 0.3s;
+  cursor: pointer;
+  font-family: var(--font);
+  font-weight: 700;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+}
+
+.btn:active {
+  transform: scale(0.95);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  background-color: #e5e7eb;
+  color: #6b7280;
+  border-color: #6b7280;
+}
+
+.btn-primary {
+  background-color: var(--color-primary);
+  color: var(--color-white);
+  border-color: var(--color-primary);
+}
+.btn-primary:hover {
+  background-color: var(--color-white);
+  color: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+}
+
+.btn-secondary {
+  background-color: var(--color-white);
+  color: var(--color-primary);
+  border-color: var(--color-white);
+}
+.btn-secondary:hover {
+  background-color: var(--color-primary);
+  color: var(--color-white);
+  border-color: var(--color-primary);
+}
+
+.btn-tertiary {
+  background-color: var(--color-secondary-dark);
+  color: var(--color-white);
+  border-color: var(--color-secondary-dark);
+}
+.btn-tertiary:hover {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.btn-danger-fusion {
+  background-color: var(--color-danger-fusion);
+  color: var(--color-white);
+  border-color: var(--color-danger-fusion);
+  border-width: 0;
+}
+.btn-danger-fusion:hover {
+  background-color: #dc2626; /* red-600 */
+}
+
+/* Inputs */
+.input-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.input-label {
+  font-weight: 700;
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  text-transform: capitalize;
+  margin-bottom: 4px;
+}
+
+.input-form-container {
+  position: relative;
+  width: 100%;
+  margin-top: auto;
+}
+
+.input-form {
+  width: 100%;
+  padding: 8px;
+  font-size: 1rem;
+  color: var(--color-primary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--color-gray-light);
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.input-form::placeholder {
+  text-transform: capitalize;
+  color: #9ca3af;
+}
+
+.input-form-animated {
+  border-bottom: none; /* We use a span for the animated border */
+}
+
+.input-form-underline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  background-color: var(--color-gray-light);
+}
+
+.input-form-underline::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background-color: var(--color-primary);
+  transition: width 0.3s ease;
+}
+
+.input-form-animated:focus ~ .input-form-underline::after {
+  width: 100%;
+}
+
+.input-select {
+  width: 100%;
+  padding: 8px;
+  font-size: 1rem;
+  color: var(--color-primary);
+  border: 2px solid var(--color-gray-light);
+  border-radius: 8px;
+  outline: none;
+  margin-top: 8px;
+  transition: border-color 0.3s;
+  background-color: transparent;
+}
+
+.input-select:focus, .input-select:active {
+  border-color: var(--color-primary);
+}
+
 /* ─── AI Chat Bubble ──────────────────────────────────────────────────────── */
 
 /* Floating trigger button */
@@ -331,7 +497,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, #6366f1, var(--accent));
   color: #fff;
   box-shadow: 0 4px 24px rgba(99, 102, 241, 0.45), 0 2px 8px rgba(0,0,0,0.4);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -354,8 +520,8 @@ body {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #22c55e;
-  border: 2px solid #0a0e1a;
+  background: var(--success);
+  border: 2px solid var(--bg);
   animation: ai-pulse 2s infinite;
 }
 
@@ -373,8 +539,8 @@ body {
   width: 360px;
   max-height: 560px;
   border-radius: 16px;
-  background: #111827;
-  border: 1px solid #1e2d45;
+  background: var(--surface);
+  border: 1px solid var(--border);
   box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.12);
   display: flex;
   flex-direction: column;
@@ -394,7 +560,7 @@ body {
   justify-content: space-between;
   padding: 14px 16px;
   background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(59,130,246,0.1));
-  border-bottom: 1px solid #1e2d45;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -415,7 +581,7 @@ body {
 }
 
 .ai-chat-avatar--bot {
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, #6366f1, var(--accent));
   color: #fff;
 }
 
@@ -427,14 +593,14 @@ body {
 
 .ai-chat-header__sub {
   font-size: 11px;
-  color: #64748b;
+  color: var(--muted);
   margin-top: 1px;
 }
 
 .ai-chat-close {
   background: none;
   border: none;
-  color: #64748b;
+  color: var(--muted);
   cursor: pointer;
   padding: 4px;
   border-radius: 6px;
@@ -483,19 +649,19 @@ body {
 }
 
 .ai-chat-msg--user .ai-chat-msg__avatar {
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, var(--accent), #6366f1);
   color: #fff;
 }
 
 .ai-chat-msg--assistant .ai-chat-msg__avatar {
-  background: #1c2539;
+  background: var(--surface2);
   color: #94a3b8;
-  border: 1px solid #1e2d45;
+  border: 1px solid var(--border);
 }
 
 .ai-chat-msg--error .ai-chat-msg__avatar {
   background: rgba(239,68,68,0.15);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .ai-chat-msg__body {
@@ -517,15 +683,15 @@ body {
 }
 
 .ai-chat-msg--user .ai-chat-msg__text {
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, var(--accent), #6366f1);
   color: #fff;
   border-bottom-right-radius: 4px;
 }
 
 .ai-chat-msg--assistant .ai-chat-msg__text {
-  background: #1c2539;
-  color: #e2e8f0;
-  border: 1px solid #1e2d45;
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
 }
 
@@ -550,8 +716,8 @@ body {
   align-items: center;
   gap: 5px;
   padding: 12px 14px;
-  background: #1c2539;
-  border: 1px solid #1e2d45;
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 14px;
   border-bottom-left-radius: 4px;
 }
@@ -560,7 +726,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #64748b;
+  background: var(--muted);
   animation: ai-typing 1.2s infinite ease-in-out;
 }
 
@@ -578,7 +744,7 @@ body {
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 12px;
-  border-top: 1px solid #1e2d45;
+  border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -608,17 +774,17 @@ body {
   align-items: flex-end;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid #1e2d45;
+  border-top: 1px solid var(--border);
   background: #0d1520;
   flex-shrink: 0;
 }
 
 .ai-chat-input {
   flex: 1;
-  background: #1c2539;
-  border: 1px solid #1e2d45;
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  color: #e2e8f0;
+  color: var(--text);
   font-family: var(--font);
   font-size: 13px;
   padding: 9px 12px;
@@ -647,7 +813,7 @@ body {
   height: 38px;
   border-radius: 10px;
   border: none;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, #6366f1, var(--accent));
   color: #fff;
   display: flex;
   align-items: center;

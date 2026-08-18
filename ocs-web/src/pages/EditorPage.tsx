@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   MousePointer2, Minus, CircleDot, GitMerge, Link2,
   Box, Square, RotateCcw, ArrowLeft, Save, FileDown,
-  Anchor, Layout, Upload,
+  Anchor, Layout, Upload, Play, Pause, TrainFront, Camera, Download
 } from 'lucide-react';
 import { Client as StompClient } from '@stomp/stompjs';
 import { ViewerEngine } from '../viewer/ViewerEngine';
@@ -144,6 +144,13 @@ export default function EditorPage() {
   const [trackMode, setTrackMode] = useState<'rect' | 'poly'>('rect');
   const [autoSnap, setAutoSnap] = useState(true);
 
+  // Simulation state
+  const [simState, setSimState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
+  const [simCameraMode, setSimCameraMode] = useState<'free' | 'chase'>('free');
+  const [chaseCamDistance, setChaseCamDistance] = useState(8000);
+  const [simZigzag, setSimZigzag] = useState(0);
+  const [simCWHeight, setSimCWHeight] = useState(5400);
+
   // Filter dropdown state
   const [showSelectFilter, setShowSelectFilter] = useState(false);
   const selectFilterRef = useRef<HTMLDivElement>(null);
@@ -201,6 +208,8 @@ export default function EditorPage() {
 
   // Project-level defaults
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>(DEFAULT_PROJECT_SETTINGS);
+  // Platform-level AI enabled status (fetched once on mount from /api/platform/settings/ai-status)
+  const [platformAiEnabled, setPlatformAiEnabled] = useState(false);
 
   // Cantilever form state — only zigzag is kept for the rubber-band preview while drawing
   const [cantFormZZ, setCantFormZZ] = useState(250);
@@ -358,6 +367,12 @@ export default function EditorPage() {
       .catch(() => {
         api.locations.get(locationId).then(loc => { applyScene(loc); loadSettings(loc); }).catch(() => { });
       });
+
+    // Fetch platform AI enabled status (independent of project)
+    fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api/platform/settings/ai-status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(status => { if (status?.enabled) setPlatformAiEnabled(true); })
+      .catch(() => { /* AI optional — fail silently */ });
   }, [locationId]);
 
   // WebSocket (STOMP) connection
@@ -504,6 +519,23 @@ export default function EditorPage() {
   useEffect(() => { if (engineRef.current) engineRef.current.trackMode = trackMode; }, [trackMode]);
   useEffect(() => { if (engineRef.current) engineRef.current.enableSnap = autoSnap; }, [autoSnap]);
   useEffect(() => { if (engineRef.current) engineRef.current.selFilter = selFilter; }, [selFilter]);
+  useEffect(() => { if (engineRef.current) engineRef.current.setSimulationState(simState); }, [simState]);
+  // Poll zigzag from engine during simulation
+  useEffect(() => {
+    if (simState === 'stopped') return;
+    let raf: number;
+    const poll = () => {
+      if (engineRef.current) {
+        setSimZigzag(engineRef.current.simZigzag);
+        setSimCWHeight(engineRef.current.simCWHeight);
+      }
+      raf = requestAnimationFrame(poll);
+    };
+    raf = requestAnimationFrame(poll);
+    return () => cancelAnimationFrame(raf);
+  }, [simState]);
+  useEffect(() => { if (engineRef.current) engineRef.current.simCameraMode = simCameraMode; }, [simCameraMode]);
+  useEffect(() => { if (engineRef.current) engineRef.current.chaseCamDistance = chaseCamDistance; }, [chaseCamDistance]);
 
   // Trigger calculation when cantilevers change (debounced)
   const triggerCalculation = useCallback((cantiList: CantileverData[]) => {
@@ -1222,6 +1254,15 @@ export default function EditorPage() {
 
   // ─── Handlers ─────────────────────────────────────────────────────────────────
 
+  const handleScreenshot = useCallback(async () => {
+    if (!engineRef.current) return;
+    const dataUrl = await engineRef.current.takeScreenshot();
+    const link = document.createElement('a');
+    link.download = `ocs-simulation-${Date.now()}.png`;
+    link.href = dataUrl;
+    link.click();
+  }, []);
+
   const toggleView = () => {
     const next: ViewMode = viewMode === '2D' ? '3D' : '2D';
     setViewMode(next);
@@ -1435,7 +1476,7 @@ export default function EditorPage() {
     <div className="ocs-app">
       <nav className="ocs-nav">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button onClick={() => navigate(-1)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
+          <button onClick={() => navigate(-1)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
             <ArrowLeft size={16} />
           </button>
           <div className="ocs-nav__brand">
@@ -1444,9 +1485,9 @@ export default function EditorPage() {
           </div>
         </div>
         <div className="ocs-nav__actions">
-          {saveError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{saveError}</span>}
+          {saveError && <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{saveError}</span>}
           {locationId && (
-            <button onClick={() => saveScene()} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: saving ? '#1e293b' : '#3b82f6', border: '1px solid #3b82f6', color: '#fff', borderRadius: 6, cursor: saving ? 'default' : 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
+            <button onClick={() => saveScene()} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: saving ? '#1e293b' : 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: 6, cursor: saving ? 'default' : 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
               <Save size={14} /> {saving ? 'Saving…' : 'Save'}
             </button>
           )}
@@ -1467,6 +1508,64 @@ export default function EditorPage() {
               <FileDown size={14} /> {downloading ? 'Generating…' : 'Report'}
             </button>
           )}
+
+          {simState !== 'stopped' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', background: '#1e293b', border: '1px solid #334155', borderRadius: 6, overflow: 'hidden' }}>
+                <button onClick={() => setSimState('playing')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simState === 'playing' ? '#166534' : 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  <Play size={14} /> Play
+                </button>
+                <button onClick={() => setSimState('paused')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simState === 'paused' ? '#b45309' : 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  <Pause size={14} /> Pause
+                </button>
+                <button onClick={() => setSimState('stopped')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  <Square size={14} fill="currentColor" /> Stop
+                </button>
+                {viewMode === '3D' && (
+                  <>
+                    <button onClick={() => setSimCameraMode(simCameraMode === 'free' ? 'chase' : 'free')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simCameraMode === 'chase' ? '#3b82f6' : 'transparent', borderLeft: '1px solid #334155', border: 'none', borderLeftStyle: 'solid', borderLeftWidth: 1, borderLeftColor: '#334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      <Camera size={14} /> {simCameraMode === 'chase' ? 'Chase' : 'Free'}
+                    </button>
+                    <button onClick={handleScreenshot} title="Download snapshot" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', background: 'transparent', border: 'none', borderLeft: '1px solid #334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      <Download size={14} />
+                    </button>
+                  </>
+                )}
+              </div>
+              {viewMode === '3D' && simCameraMode === 'chase' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="range"
+                    min={1000}
+                    max={20000}
+                    step={500}
+                    value={chaseCamDistance}
+                    onChange={(e) => setChaseCamDistance(Number(e.target.value))}
+                    style={{ width: 80, accentColor: '#3b82f6' }}
+                    title={`Camera distance: ${(chaseCamDistance / 1000).toFixed(1)}m`}
+                  />
+                  <span style={{ color: '#94a3b8', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>{(chaseCamDistance / 1000).toFixed(1)}m</span>
+                </div>
+              )}
+              {simState !== 'stopped' && simCameraMode === 'chase' && viewMode === '3D' && (
+                <>
+                  <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>Zigzag:</span>
+                    <span style={{ color: '#f59e0b', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'monospace' }}>{Math.abs(simZigzag).toFixed(0)} mm {simZigzag > 0 ? 'R' : (simZigzag < 0 ? 'L' : '')}</span>
+                  </div>
+                  <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>CW Height:</span>
+                    <span style={{ color: '#3b82f6', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'monospace' }}>{simCWHeight.toFixed(0)} mm</span>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <button onClick={() => setSimState('playing')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 6, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
+              <TrainFront size={14} /> Simulation
+            </button>
+          )}
+
           <button className={`view-toggle ${viewMode === '3D' ? 'view-toggle--3d' : ''}`} onClick={toggleView}>
             {viewMode === '2D' ? <><Box size={15} /><span>3D</span></> : <><Square size={15} /><span>2D</span></>}
           </button>
@@ -1490,8 +1589,8 @@ export default function EditorPage() {
               {showSelectFilter && drawMode === 'none' && viewMode === '2D' && (
                 <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '8px', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, animation: 'filterScaleIn 0.15s ease-out', transformOrigin: 'top center', fontSize: 11, width: '100%' }}>
                   <style>{`@keyframes filterScaleIn { from { opacity: 0; transform: scaleY(0.95) translateY(-5px); } to { opacity: 1; transform: scaleY(1) translateY(0); } }`}</style>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Tracks</label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: '#3b82f6', cursor: 'pointer' }} /> Poles</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.tracks} onChange={e => setSelFilter(f => ({ ...f, tracks: e.target.checked }))} style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} /> Tracks</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.poles} onChange={e => setSelFilter(f => ({ ...f, poles: e.target.checked }))} style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} /> Poles</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.cantilevers} onChange={e => setSelFilter(f => ({ ...f, cantilevers: e.target.checked }))} style={{ accentColor: '#f59e0b', cursor: 'pointer' }} /> Cantilevers</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.vanes} onChange={e => setSelFilter(f => ({ ...f, vanes: e.target.checked }))} style={{ accentColor: '#9333ea', cursor: 'pointer' }} /> Vanes</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><input type="checkbox" checked={selFilter.anchorPoints} onChange={e => setSelFilter(f => ({ ...f, anchorPoints: e.target.checked }))} style={{ accentColor: '#f97316', cursor: 'pointer' }} /> Anchor Points</label>
@@ -1501,7 +1600,7 @@ export default function EditorPage() {
             </div>
 
             {totalSelected > 0 && (
-              <div style={{ marginTop: 12, padding: '8px', background: '#1e293b', border: '1px solid #3b82f6', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 6, width: '100%', animation: 'filterScaleIn 0.2s', textAlign: 'center' }}>
+              <div style={{ marginTop: 12, padding: '8px', background: '#1e293b', border: '1px solid var(--accent)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 6, width: '100%', animation: 'filterScaleIn 0.2s', textAlign: 'center' }}>
                 <span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>
                   {totalSelected} ITEM{totalSelected === 1 ? '' : 'S'} SELECTED
                 </span>
@@ -1512,13 +1611,13 @@ export default function EditorPage() {
                   <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '5px 8px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Vane</button>
                 )}
                 {selectedPoles.length === 1 && (
-                  <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '5px 8px', background: '#ef4444', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Pole</button>
+                  <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '5px 8px', background: 'var(--danger)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Pole</button>
                 )}
                 {selectedFoundations.length === 1 && (
-                  <button onClick={() => setEditFoundationIdx(selectedFoundations[0])} style={{ padding: '5px 8px', background: '#22c55e', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Foundation</button>
+                  <button onClick={() => setEditFoundationIdx(selectedFoundations[0])} style={{ padding: '5px 8px', background: 'var(--success)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Foundation</button>
                 )}
                 {selectedTracks.length === 1 && (
-                  <button onClick={() => setEditTrackIdx(selectedTracks[0])} style={{ padding: '5px 8px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Track</button>
+                  <button onClick={() => setEditTrackIdx(selectedTracks[0])} style={{ padding: '5px 8px', background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Track</button>
                 )}
                 {selectedAnchorPoints.length === 1 && (
                   <button onClick={() => setEditAnchorPointIdx(selectedAnchorPoints[0])} style={{ padding: '5px 8px', background: '#f97316', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Anchor Point</button>
@@ -1542,8 +1641,8 @@ export default function EditorPage() {
               />
               {drawMode === 'track' && viewMode === '2D' && (
                 <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px', display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, animation: 'fadeInDown 0.2s ease-out' }}>
-                  <button className={`tool-btn ${trackMode === 'rect' ? 'tool-btn--active' : ''}`} onClick={e => { e.stopPropagation(); setTrackMode('rect'); }} style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'rect' ? '#3b82f6' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}>Rect</button>
-                  <button className={`tool-btn ${trackMode === 'poly' ? 'tool-btn--active' : ''}`} onClick={e => { e.stopPropagation(); setTrackMode('poly'); }} style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'poly' ? '#3b82f6' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}>Polyline</button>
+                  <button className={`tool-btn ${trackMode === 'rect' ? 'tool-btn--active' : ''}`} onClick={e => { e.stopPropagation(); setTrackMode('rect'); }} style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'rect' ? 'var(--accent)' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}>Rect</button>
+                  <button className={`tool-btn ${trackMode === 'poly' ? 'tool-btn--active' : ''}`} onClick={e => { e.stopPropagation(); setTrackMode('poly'); }} style={{ width: '100%', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', border: 'none', background: trackMode === 'poly' ? 'var(--accent)' : 'transparent', color: '#fff', cursor: 'pointer', textAlign: 'left' }}>Polyline</button>
                 </div>
               )}
             </div>
@@ -1588,11 +1687,11 @@ export default function EditorPage() {
           </div>
           <div style={{ position: 'absolute', bottom: 20, right: 20, background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(51,65,85,0.5)', color: '#94a3b8', padding: '10px 14px', borderRadius: 6, zIndex: 50, fontFamily: 'monospace', fontSize: 13, userSelect: 'none' }}>
             <div style={{ paddingBottom: 6, borderBottom: '1px solid rgba(51,65,85,0.5)', marginBottom: 6, fontWeight: 600 }}>Axis View</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: '#ef4444' }}>X</strong> Right (Pan)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: '#3b82f6' }}>Z</strong> {viewMode === '2D' ? 'Up (Ver)' : 'Front/Back'}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: 'var(--danger)' }}>X</strong> Right (Pan)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '15px 1fr', gap: '8px', alignItems: 'center' }}><strong style={{ color: 'var(--accent)' }}>Z</strong> {viewMode === '2D' ? 'Up (Ver)' : 'Front/Back'}</div>
             <div style={{ marginTop: 12, display: 'flex', alignItems: 'center' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={autoSnap} onChange={e => setAutoSnap(e.target.checked)} style={{ cursor: 'pointer', accentColor: '#3b82f6' }} />
+                <input type="checkbox" checked={autoSnap} onChange={e => setAutoSnap(e.target.checked)} style={{ cursor: 'pointer', accentColor: 'var(--accent)' }} />
                 <span style={{ fontSize: 12 }}>Auto-Snap Grid</span>
               </label>
             </div>
@@ -1610,7 +1709,7 @@ export default function EditorPage() {
                 background: 'rgba(0,0,0,0.58)',
                 border: '1px solid rgba(255,255,255,0.09)',
                 borderRadius: 8,
-                color: '#e2e8f0',
+                color: 'var(--text)',
                 fontFamily: 'monospace',
                 fontSize: 11,
                 backdropFilter: 'blur(6px)',
@@ -1623,7 +1722,7 @@ export default function EditorPage() {
                     to   { opacity: 1; transform: translateY(0); }
                   }
                   .results-tbl { border-collapse: collapse; width: 100%; }
-                  .results-tbl th { color: #64748b; font-weight: 600; padding: 4px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+                  .results-tbl th { color: var(--muted); font-weight: 600; padding: 4px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
                   .results-tbl td { padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }
                   .results-tbl tr:last-child td { border-bottom: none; }
                   .results-tbl tr:hover td { background: rgba(255,255,255,0.03); }
@@ -1736,11 +1835,11 @@ export default function EditorPage() {
 
         {trackModal && (
           <Modal title="Configure Track" onClose={() => setTrackModal(null)}>
-            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <label style={LBL}>Label <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input id="track-label-input" style={INP} autoFocus />
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
               <button style={{ padding: '6px 16px', background: '#475569', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => setTrackModal(null)}>Cancel</button>
-              <button style={{ padding: '6px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
+              <button style={{ padding: '6px 16px', background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer' }} onClick={() => {
                 const lbl = (document.getElementById('track-label-input') as HTMLInputElement).value.trim();
                 if (!lbl) { alert('Label is required'); return; }
                 const finalTrack = trackModal!.map(t => ({ ...t, label: lbl }));
@@ -1787,11 +1886,11 @@ export default function EditorPage() {
 
         {vaneModal && (
           <Modal title="Configure Vane" onClose={() => { setVaneModal(null); pendingVaneCantRef.current = null; }}>
-            <label style={LBL}>Label <span style={{ color: '#ef4444' }}>*</span></label>
+            <label style={LBL}>Label <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input value={vaneFormLabel} onChange={e => setVaneFormLabel(e.target.value)} style={INP} autoFocus />
             <div style={ROW}>
               <div style={{ flex: 1 }}>
-                <label style={LBL}>Qty Droppers <span style={{ color: '#64748b', fontSize: 10 }}>(0 = auto)</span></label>
+                <label style={LBL}>Qty Droppers <span style={{ color: 'var(--muted)', fontSize: 10 }}>(0 = auto)</span></label>
                 <input type="number" min={0} value={vaneFormDroppers} onChange={e => setVaneFormDroppers(+e.target.value)} style={INP} />
               </div>
               <div style={{ flex: 1 }}>
@@ -1813,7 +1912,7 @@ export default function EditorPage() {
               </div>
             )}
 
-            <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
               Inter-dropper spacing = (vane length − 2 × initial separation) ÷ (droppers − 1), calculated automatically.
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
@@ -1962,7 +2061,7 @@ export default function EditorPage() {
       )}
 
       {/* ── AI Chat Bubble ────────────────────────────────────────────── */}
-      {locationId && (
+      {locationId && platformAiEnabled && (
         <AiChatBubble
           locationId={locationId}
           onSceneUpdated={(updatedSceneData) => {

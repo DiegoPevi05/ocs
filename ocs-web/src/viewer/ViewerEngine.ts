@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { ApiLine, ApiResponse, DrawMode, ViewMode } from '../types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -96,6 +97,12 @@ export class ViewerEngine {
   public simCWHeight: number = 5400;
   public chaseCamDistance: number = 8000;
   private trainGroup?: THREE.Group;
+  private pantoGroup?: THREE.Object3D;
+  private pantoArmLower?: THREE.Object3D;
+  private pantoArmUpperGroup?: THREE.Object3D;
+  private pantoHeadGroup?: THREE.Object3D;
+  private pantoRestHeight: number = 0;
+  private trainGlbLoaded: boolean = false;
   private trackCurve?: THREE.CatmullRomCurve3;
   private trackCantilevers: { c: any; progress: number }[] = [];
 
@@ -1050,7 +1057,86 @@ export class ViewerEngine {
   }
 
   private initTrainPlaceholder() {
+    // Try loading GLB model first, fall back to simple geometry
     this.trainGroup = new THREE.Group();
+    this.trainGroup.visible = false;
+    this.scene.add(this.trainGroup);
+
+    const loader = new GLTFLoader();
+    loader.load(
+      '/models/train.glb',
+      (gltf) => {
+        const model = gltf.scene;
+
+        // GLB files are typically in meters — our scene is in mm, so scale ×1000
+        model.scale.set(1000, 1000, 1000);
+
+        // Update world matrices so getWorldPosition works correctly after scaling
+        model.updateMatrixWorld(true);
+
+        // Find the Pantograph group and its parts for IK animation
+        this.pantoGroup = model.getObjectByName('Pantograph') ?? undefined;
+        this.pantoArmLower = model.getObjectByName('PantographArmLower') ?? undefined;
+        this.pantoArmUpperGroup = model.getObjectByName('PantographArmUpperGroup') ?? undefined;
+        this.pantoHeadGroup = model.getObjectByName('PantographHeadGroup') ?? undefined;
+
+        // Find PantographHead (the part that touches the wire)
+        const pantoHead = model.getObjectByName('PantographHead');
+
+        if (pantoHead) {
+          // Compute rest height: how high PantographHead sits above trainGroup origin
+          const headWorld = new THREE.Vector3();
+          pantoHead.getWorldPosition(headWorld);
+          const modelWorld = new THREE.Vector3();
+          model.getWorldPosition(modelWorld);
+          this.pantoRestHeight = headWorld.y - modelWorld.y;
+          console.log(`[OCS] GLB loaded — PantographHead rest height: ${this.pantoRestHeight.toFixed(0)} mm`);
+        } else {
+          console.warn('[OCS] GLB loaded but PantographHead not found — pantograph tracking disabled');
+          this.pantoRestHeight = 5400;
+        }
+
+        if (!this.pantoGroup) {
+          console.warn('[OCS] GLB loaded but Pantograph group not found — will move PantographHead directly');
+        }
+
+        // Make all meshes cast/receive shadows and set layers for 3D
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+          child.layers.set(2); // Only visible in 3D mode
+        });
+
+        // Clear placeholder geometry if any
+        while (this.trainGroup!.children.length) {
+          const c = this.trainGroup!.children[0] as any;
+          if (c.geometry) c.geometry.dispose();
+          if (c.material) {
+            if (Array.isArray(c.material)) c.material.forEach((m: any) => m.dispose());
+            else c.material.dispose();
+          }
+          this.trainGroup!.remove(c);
+        }
+
+        this.trainGroup!.add(model);
+        this.trainGlbLoaded = true;
+        console.log('[OCS] Train GLB model loaded successfully');
+      },
+      undefined,
+      (err) => {
+        console.warn('[OCS] Failed to load train GLB, using placeholder geometry:', err);
+        this._buildPlaceholderTrain();
+      }
+    );
+
+    // Build placeholder immediately (will be replaced if GLB loads)
+    this._buildPlaceholderTrain();
+  }
+
+  private _buildPlaceholderTrain() {
+    if (!this.trainGroup) return;
     const bodyGeo = new THREE.BoxGeometry(2500, 3500, 15000); // W=2.5m, H=3.5m, L=15m
     bodyGeo.translate(0, 1750, 0); // Origin at bottom
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8 });
@@ -1065,14 +1151,14 @@ export class ViewerEngine {
     panto.position.set(0, 5400, 0); // ~5.4m high
     this.trainGroup.add(panto);
 
-    this.trainGroup.visible = false;
-    this.scene.add(this.trainGroup);
+    this.pantoGroup = undefined;
+    this.pantoRestHeight = 5400;
+    this.trainGlbLoaded = false;
   }
 
   // ─── Render loop ─────────────────────────────────────────────────────────────
 
   public simCameraMode: 'free' | 'chase' = 'free';
-  public chaseCamDistance: number = 8000;
 
   private loop = (): void => {
     requestAnimationFrame(this.loop);
@@ -1109,10 +1195,47 @@ export class ViewerEngine {
       
       this.simCWHeight = targetHeight;
 
-      const panto = this.trainGroup.getObjectByName('PantographHead');
-      if (panto) {
-          // Smoothly animate the pantograph up/down to match the wire height
+      // Animate pantograph to follow contact wire height
+      if (this.trainGlbLoaded) {
+        // GLB model: move the entire Pantograph group so all arms move together
+        const pantoHead = this.trainGroup.getObjectByName('PantographHead');
+        if (pantoHead) {
+          // Get current world Y of the pantograph head
+          const headWorld = new THREE.Vector3();
+          pantoHead.getWorldPosition(headWorld);
+          const currentRelY = headWorld.y - this.trainGroup.position.y;
+          const deltaY = targetHeight - currentRelY;
+
+          if (this.pantoGroup) {
+            // A robust way to "open" the pantograph without needing perfect bone pivots:
+            // We scale the whole pantograph group vertically to reach the target height.
+            // Since scaling squishes/stretches the geometry, we inversely scale the head so it stays its normal shape.
+            const baseWorld = new THREE.Vector3();
+            this.pantoGroup.getWorldPosition(baseWorld);
+            const pantoBaseY = baseWorld.y;
+            
+            const desiredHeight = targetHeight - (pantoBaseY - this.trainGroup.position.y);
+            const restHeight = this.pantoRestHeight - (pantoBaseY - this.trainGroup.position.y);
+            
+            if (restHeight > 0 && desiredHeight > 0) {
+               const scaleY = desiredHeight / restHeight;
+               this.pantoGroup.scale.y += (scaleY - this.pantoGroup.scale.y) * 0.1;
+               
+               if (this.pantoHeadGroup) {
+                 this.pantoHeadGroup.scale.y = 1 / this.pantoGroup.scale.y;
+               }
+            }
+          } else {
+            // Fallback: move PantographHead directly
+            pantoHead.position.y += (deltaY * 0.1) / 1000; // Convert mm back to model meters
+          }
+        }
+      } else {
+        // Placeholder: PantographHead is a direct child, set Y directly
+        const panto = this.trainGroup.getObjectByName('PantographHead');
+        if (panto) {
           panto.position.y += (targetHeight - panto.position.y) * 0.1;
+        }
       }
 
       // Calculate real-time zigzag (lateral offset of contact wire from track center)
@@ -2192,13 +2315,13 @@ export class ViewerEngine {
 
     // Scene Z now equals editor Z in both 2D and 3D — no negation needed.
     const sz = (z: number) => z;
-    const isFreeCam = this.viewMode === '3D' && this.simState !== 'stopped' && this.simCameraMode === 'free';
+    const isSimulating3D = this.viewMode === '3D' && this.simState !== 'stopped';
 
     this.dynData.poles.forEach(p => {
       if (p.label) addLbl(`${p.label} (H: ${Math.round(p.h || 3000)})`, new THREE.Vector3(p.x + 400, (p.y || 0) + (p.h || 3000) + 200, sz(p.z || 0)));
     });
 
-    if (!isFreeCam) {
+    if (!isSimulating3D) {
       if (this.dynData.completedTracks) {
         this.dynData.completedTracks.forEach(tr => {
         if (tr.length > 0 && tr[0].label) {

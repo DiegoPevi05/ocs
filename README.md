@@ -21,10 +21,13 @@
 
 ## Demo
 
-<!-- Direct GitHub Raw Video Embed -->
+<!-- YouTube Video Embed -->
 <p align="center">
-  <video src="https://github.com/DiegoPevi05/ocs/raw/main/docs/images/demo.mp4" controls="controls" muted="muted" width="720"></video>
+  <a href="https://www.youtube.com/watch?v=OpfH7FzPALA" target="_blank">
+    <img src="https://img.youtube.com/vi/OpfH7FzPALA/maxresdefault.jpg" alt="Watch the OCS Platform Demo" width="720"/>
+  </a>
 </p>
+<p align="center"><em>Click the image above to watch the simulation demo on YouTube!</em></p>
 
 ---
 

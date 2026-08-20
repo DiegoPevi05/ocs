@@ -23,14 +23,10 @@
 
 ## Demo
 
-<!-- Replace the link below with the URL to your video (YouTube, Vimeo, etc.) -->
+<!-- Place your demo video in docs/images/demo.mp4 -->
 <p align="center">
-  <a href="https://your-video-url-here">
-    <img src="docs/images/video-thumbnail.png" alt="OCS Platform Demo Video" width="720"/>
-  </a>
+  <video src="docs/images/demo.mp4" width="720" controls="controls" muted="muted" playsinline="playsinline"></video>
 </p>
-
-<p align="center"><em>Click the image above to watch the demo video</em></p>
 
 ---
 

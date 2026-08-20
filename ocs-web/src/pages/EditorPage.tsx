@@ -146,7 +146,7 @@ export default function EditorPage() {
 
   // Simulation state
   const [simState, setSimState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
-  const [simCameraMode, setSimCameraMode] = useState<'free' | 'chase'>('free');
+  const [simCameraMode, setSimCameraMode] = useState<'free' | 'chase' | 'side' | 'front'>('free');
   const [chaseCamDistance, setChaseCamDistance] = useState(8000);
   const [simZigzag, setSimZigzag] = useState(0);
   const [simCWHeight, setSimCWHeight] = useState(5400);
@@ -1127,11 +1127,17 @@ export default function EditorPage() {
 
     const container = containerRef.current;
     if (container) {
+      const handleViewerCamDistance = (e: any) => {
+        setChaseCamDistance(e.detail.distance);
+      };
+
       container.addEventListener('viewer-click', handleViewerClick);
       container.addEventListener('viewer-select', handleViewerSelect);
+      container.addEventListener('viewer-cam-distance', handleViewerCamDistance);
       return () => {
         container.removeEventListener('viewer-click', handleViewerClick);
         container.removeEventListener('viewer-select', handleViewerSelect);
+        container.removeEventListener('viewer-cam-distance', handleViewerCamDistance);
       };
     }
   }, [saveScene]);
@@ -1523,8 +1529,12 @@ export default function EditorPage() {
                 </button>
                 {viewMode === '3D' && (
                   <>
-                    <button onClick={() => setSimCameraMode(simCameraMode === 'free' ? 'chase' : 'free')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simCameraMode === 'chase' ? '#3b82f6' : 'transparent', borderLeft: '1px solid #334155', border: 'none', borderLeftStyle: 'solid', borderLeftWidth: 1, borderLeftColor: '#334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
-                      <Camera size={14} /> {simCameraMode === 'chase' ? 'Chase' : 'Free'}
+                    <button onClick={() => {
+                      const modes: ('free'|'chase'|'side'|'front')[] = ['free', 'chase', 'side', 'front'];
+                      const next = modes[(modes.indexOf(simCameraMode) + 1) % modes.length];
+                      setSimCameraMode(next);
+                    }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simCameraMode !== 'free' ? '#3b82f6' : 'transparent', borderLeft: '1px solid #334155', border: 'none', borderLeftStyle: 'solid', borderLeftWidth: 1, borderLeftColor: '#334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      <Camera size={14} /> {simCameraMode.charAt(0).toUpperCase() + simCameraMode.slice(1)}
                     </button>
                     <button onClick={handleScreenshot} title="Download snapshot" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', background: 'transparent', border: 'none', borderLeft: '1px solid #334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
                       <Download size={14} />
@@ -1532,7 +1542,7 @@ export default function EditorPage() {
                   </>
                 )}
               </div>
-              {viewMode === '3D' && simCameraMode === 'chase' && (
+              {viewMode === '3D' && simCameraMode !== 'free' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input
                     type="range"
@@ -1547,7 +1557,7 @@ export default function EditorPage() {
                   <span style={{ color: '#94a3b8', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>{(chaseCamDistance / 1000).toFixed(1)}m</span>
                 </div>
               )}
-              {simState !== 'stopped' && simCameraMode === 'chase' && viewMode === '3D' && (
+              {simState !== 'stopped' && simCameraMode !== 'free' && viewMode === '3D' && (
                 <>
                   <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>Zigzag:</span>

@@ -575,7 +575,7 @@ export class ViewerEngine {
 
       let closestPt: THREE.Vector2 | null = null;
       let minD = 5000;
-      
+
       this.snapCantileverIdx = -1;
       this.snapPoleIdx = -1;
 
@@ -938,12 +938,12 @@ export class ViewerEngine {
         const mouse = new THREE.Vector2();
         mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        
+
         const raycaster = new THREE.Raycaster();
         raycaster.params.Line.threshold = 800; // generous tolerance for clicking track lines
         raycaster.layers.set(2);               // track 3D lines live on layer 2
         raycaster.setFromCamera(mouse, this.cam3D);
-        
+
         const candidates: THREE.Object3D[] = [];
         this.dynamicGroup.traverse((child) => {
           if (child.userData?.type === 'track' && child.layers.isEnabled(2)) {
@@ -961,7 +961,7 @@ export class ViewerEngine {
       }
       return;
     }
-    
+
     if (e.button === 1 || e.button === 2 || (e.button === 0 && e.ctrlKey)) {
       this.panning = true;
       this.panOrigin.set(e.clientX, e.clientY);
@@ -1017,7 +1017,21 @@ export class ViewerEngine {
   }
 
   private onWheel(e: WheelEvent): void {
-    if (this.viewMode !== '2D') return;
+    if (this.viewMode === '3D') {
+      if (this.simCameraMode !== 'free') {
+        e.preventDefault();
+        // Adjust chaseCamDistance (zoom in/out) based on scroll
+        const scrollAmount = e.deltaY > 0 ? 500 : -500;
+        this.chaseCamDistance = Math.max(1000, Math.min(20000, this.chaseCamDistance + scrollAmount));
+        
+        // Dispatch event so React UI can sync the slider
+        this.container.dispatchEvent(new CustomEvent('viewer-cam-distance', {
+          detail: { distance: this.chaseCamDistance }
+        }));
+      }
+      return;
+    }
+
     e.preventDefault();
 
     const factor = e.deltaY > 0 ? 0.875 : 1 / 0.875;
@@ -1158,11 +1172,11 @@ export class ViewerEngine {
 
   // ─── Render loop ─────────────────────────────────────────────────────────────
 
-  public simCameraMode: 'free' | 'chase' = 'free';
+  public simCameraMode: 'free' | 'chase' | 'side' | 'front' = 'free';
 
   private loop = (): void => {
     requestAnimationFrame(this.loop);
-    
+
     // Train Simulation Update
     if (this.simState === 'playing' && this.trainGroup && this.trackCurve) {
       this.simProgress += this.simSpeed;
@@ -1170,29 +1184,29 @@ export class ViewerEngine {
 
       const pos = this.trackCurve.getPointAt(this.simProgress);
       const tangent = this.trackCurve.getTangentAt(this.simProgress);
-      
+
       this.trainGroup.position.copy(pos);
       const lookAtTarget = pos.clone().add(tangent);
       this.trainGroup.lookAt(lookAtTarget);
-      
+
       // Calculate smooth contact wire height using inverse distance weighting of nearby cantilevers
       let targetHeight = 5400;
       if (this.dynData?.cantilevers?.length > 0) {
-          let totalWeight = 0;
-          let weightedSum = 0;
-          this.dynData.cantilevers.forEach((c: any) => {
-              const d = Math.max(1, Math.hypot(pos.x - c.x2, pos.z - (-(c.z2 ?? 0))));
-              if (d < 100000) { // Only consider cantilevers within 100m
-                  const weight = 1 / Math.pow(d, 2);
-                  weightedSum += (c.contactWireHeight ?? 5400) * weight;
-                  totalWeight += weight;
-              }
-          });
-          if (totalWeight > 0) {
-              targetHeight = weightedSum / totalWeight;
+        let totalWeight = 0;
+        let weightedSum = 0;
+        this.dynData.cantilevers.forEach((c: any) => {
+          const d = Math.max(1, Math.hypot(pos.x - c.x2, pos.z - (-(c.z2 ?? 0))));
+          if (d < 100000) { // Only consider cantilevers within 100m
+            const weight = 1 / Math.pow(d, 2);
+            weightedSum += (c.contactWireHeight ?? 5400) * weight;
+            totalWeight += weight;
           }
+        });
+        if (totalWeight > 0) {
+          targetHeight = weightedSum / totalWeight;
+        }
       }
-      
+
       this.simCWHeight = targetHeight;
 
       // Animate pantograph to follow contact wire height
@@ -1203,8 +1217,13 @@ export class ViewerEngine {
           // Get current world Y of the pantograph head
           const headWorld = new THREE.Vector3();
           pantoHead.getWorldPosition(headWorld);
+          // Offset in millimeters (e.g. 50mm) to make the top of the carbon strip touch the wire,
+          // rather than the origin center of the PantographHead mesh.
+          const PANTO_CONTACT_OFFSET = -100;
+          const adjustedTargetHeight = targetHeight + PANTO_CONTACT_OFFSET;
+
           const currentRelY = headWorld.y - this.trainGroup.position.y;
-          const deltaY = targetHeight - currentRelY;
+          const deltaY = adjustedTargetHeight - currentRelY;
 
           if (this.pantoGroup) {
             // A robust way to "open" the pantograph without needing perfect bone pivots:
@@ -1213,17 +1232,17 @@ export class ViewerEngine {
             const baseWorld = new THREE.Vector3();
             this.pantoGroup.getWorldPosition(baseWorld);
             const pantoBaseY = baseWorld.y;
-            
-            const desiredHeight = targetHeight - (pantoBaseY - this.trainGroup.position.y);
+
+            const desiredHeight = adjustedTargetHeight - (pantoBaseY - this.trainGroup.position.y);
             const restHeight = this.pantoRestHeight - (pantoBaseY - this.trainGroup.position.y);
-            
+
             if (restHeight > 0 && desiredHeight > 0) {
-               const scaleY = desiredHeight / restHeight;
-               this.pantoGroup.scale.y += (scaleY - this.pantoGroup.scale.y) * 0.1;
-               
-               if (this.pantoHeadGroup) {
-                 this.pantoHeadGroup.scale.y = 1 / this.pantoGroup.scale.y;
-               }
+              const scaleY = desiredHeight / restHeight;
+              this.pantoGroup.scale.y += (scaleY - this.pantoGroup.scale.y) * 0.1;
+
+              if (this.pantoHeadGroup) {
+                this.pantoHeadGroup.scale.y = 1 / this.pantoGroup.scale.y;
+              }
             }
           } else {
             // Fallback: move PantographHead directly
@@ -1248,23 +1267,23 @@ export class ViewerEngine {
           const Ax = v.x1, Az = v.z1;
           const Bx = v.x2, Bz = v.z2;
           const ABx = Bx - Ax, ABz = Bz - Az;
-          
+
           const denom = ABx * tangent.x + ABz * tangent.z;
           if (Math.abs(denom) > 1e-6) {
             const num = -((Ax - pos.x) * tangent.x + (Az - pos.z) * tangent.z);
             const t = num / denom;
-            
+
             // Allow a tiny margin for t in case we are exactly at the cantilever
             if (t >= -0.01 && t <= 1.01) {
               const Cx = Ax + t * ABx;
               const Cz = Az + t * ABz;
-              
+
               // Signed distance from pantograph center to contact point
               // Normal vector N = (-tangent.z, tangent.x)
               const dx = Cx - pos.x;
               const dz = Cz - pos.z;
               const signedDist = dx * (-tangent.z) + dz * tangent.x;
-              
+
               if (Math.abs(signedDist) < minZzDist && Math.abs(signedDist) < 2000) {
                 minZzDist = Math.abs(signedDist);
                 this.simZigzag = signedDist;
@@ -1279,15 +1298,15 @@ export class ViewerEngine {
         if (this.trackCantilevers.length >= 2) {
           let behind = this.trackCantilevers[0];
           let ahead = this.trackCantilevers[this.trackCantilevers.length - 1];
-          
+
           for (let i = 0; i < this.trackCantilevers.length - 1; i++) {
-            if (this.trackCantilevers[i].progress <= this.simProgress && this.trackCantilevers[i+1].progress >= this.simProgress) {
+            if (this.trackCantilevers[i].progress <= this.simProgress && this.trackCantilevers[i + 1].progress >= this.simProgress) {
               behind = this.trackCantilevers[i];
-              ahead = this.trackCantilevers[i+1];
+              ahead = this.trackCantilevers[i + 1];
               break;
             }
           }
-          
+
           const progSpan = ahead.progress - behind.progress;
           if (progSpan > 0) {
             const t = (this.simProgress - behind.progress) / progSpan;
@@ -1302,14 +1321,30 @@ export class ViewerEngine {
         }
       }
 
-      if (this.simCameraMode === 'chase' && this.viewMode === '3D') {
-          const offset = tangent.clone().multiplyScalar(-this.chaseCamDistance);
-          offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
-          const camPos = pos.clone().add(offset);
-          this.cam3D.position.lerp(camPos, 0.12);
+      if (this.simCameraMode !== 'free' && this.viewMode === '3D') {
+        let offset = new THREE.Vector3();
+        
+        if (this.simCameraMode === 'chase') {
+          offset = tangent.clone().multiplyScalar(-this.chaseCamDistance);
+        } else if (this.simCameraMode === 'front') {
+          offset = tangent.clone().multiplyScalar(this.chaseCamDistance);
+        } else if (this.simCameraMode === 'side') {
+          // Cross product of tangent and UP vector gives a perpendicular vector (side)
+          offset = tangent.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(this.chaseCamDistance);
+        }
+        
+        offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
+        
+        // In side mode, we want to look at the train profile more level with the wire
+        if (this.simCameraMode === 'side') {
+           offset.y = targetHeight;
+        }
 
-          const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
-          this.controls.target.lerp(camTarget, 0.12);
+        const camPos = pos.clone().add(offset);
+        this.cam3D.position.lerp(camPos, 0.12);
+
+        const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
+        this.controls.target.lerp(camTarget, 0.12);
       }
     }
 
@@ -1336,14 +1371,14 @@ export class ViewerEngine {
         let activeTrackPoints = null;
 
         if (this.dynData?.selectedTracks?.length > 0) {
-           const idx = this.dynData.selectedTracks[0];
-           activeTrackPoints = this.dynData.completedTracks?.[idx];
+          const idx = this.dynData.selectedTracks[0];
+          activeTrackPoints = this.dynData.completedTracks?.[idx];
         } else if (this.dynData?.completedTracks?.length > 0) {
-           activeTrackPoints = this.dynData.completedTracks[0];
+          activeTrackPoints = this.dynData.completedTracks[0];
         }
 
         if (!activeTrackPoints && this.dynData?.trackPoints?.length >= 2) {
-           activeTrackPoints = this.dynData.trackPoints;
+          activeTrackPoints = this.dynData.trackPoints;
         }
 
         if (activeTrackPoints && activeTrackPoints.length >= 2) {
@@ -1896,8 +1931,8 @@ export class ViewerEngine {
     const newSel = this.dynData?.selectedTracks?.[0];
 
     if (oldSel !== newSel && this.simState !== 'stopped') {
-        this.trackCurve = undefined;
-        this.setSimulationState(this.simState);
+      this.trackCurve = undefined;
+      this.setSimulationState(this.simState);
     }
 
     this._renderDynamic();
@@ -2010,21 +2045,21 @@ export class ViewerEngine {
         const isSelected = data.selectedFoundations?.includes(i) || false;
         const isHovered = this.hoveredState?.type === 'foundation' && this.hoveredState?.index === i;
         const fColor = isSelected ? 0xffa500 : (isHovered ? 0xfbbf24 : 0xb45309); // amber-brown foundations
-        
+
         const w = f.width ?? 600;
         const l = f.length ?? 600;
-        
+
         // 2D Square
         const rectGeo = new THREE.PlaneGeometry(w, l);
         rectGeo.rotateX(-Math.PI / 2);
         const rectMat = new THREE.MeshBasicMaterial({ color: fColor, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
         const rectEdgeGeo = new THREE.EdgesGeometry(rectGeo);
         const rectEdgeMat = new THREE.LineBasicMaterial({ color: fColor });
-        
+
         const mesh2d = new THREE.Mesh(rectGeo, rectMat);
         mesh2d.position.set(f.x, f.y || 0, f.z);
         mesh2d.layers.set(1);
-        
+
         const edges2d = new THREE.LineSegments(rectEdgeGeo, rectEdgeMat);
         edges2d.position.set(f.x, f.y || 0, f.z);
         edges2d.layers.set(1);
@@ -2324,124 +2359,124 @@ export class ViewerEngine {
     if (!isSimulating3D) {
       if (this.dynData.completedTracks) {
         this.dynData.completedTracks.forEach(tr => {
-        if (tr.length > 0 && tr[0].label) {
-          const mid = Math.floor(tr.length / 2);
-          const p = tr[mid];
-          addLbl(tr[0].label, new THREE.Vector3(p.x, (p.y || 0) + 100, sz(p.z)));
-        }
-      });
-    }
-
-    if (this.dynData.cantilevers) {
-      this.dynData.cantilevers.forEach(c => {
-        const rawX = c.x2raw ?? c.x2;
-        const rawZ = c.z2raw ?? c.z2;
-
-        const dx = rawX - c.x1;
-        const dz = rawZ - c.z1;
-        const len = Math.hypot(dx, dz);
-        let finalX = rawX, finalZ = rawZ;
-        if (len > 0) {
-          const zz = (c as any).zigzag ?? 250;
-          finalX = rawX + (dx / len) * zz;
-          finalZ = rawZ + (dz / len) * zz;
-        }
-
-        const mx = (c.x1 + finalX) / 2;
-        const mz = (c.z1 + finalZ) / 2;
-
-        const perpOffset = 400;
-        let px = 0, pz = 0;
-        if (len > 0) {
-          px = (-dz / len) * perpOffset;
-          pz = (dx / len) * perpOffset;
-        }
-
-        if (c.label) {
-          addLbl(c.label, new THREE.Vector3(mx + px, 100, sz(mz + pz)));
-        }
-
-        if (this.viewMode === '2D') {
-          const zz = (c as any).zigzag ?? 250;
-          const angleDeg = Math.atan2(-dz, dx) * (180 / Math.PI);
-          const labelOffset = 400;
-          const lblX = len > 0 ? finalX + (dx / len) * labelOffset : finalX;
-          const lblZ = len > 0 ? finalZ + (dz / len) * labelOffset : finalZ;
-          addRotatedLbl(`${Math.round(zz)} mm`, new THREE.Vector3(lblX, 100, lblZ), angleDeg);
-        }
-      });
-    }
-
-    if (this.dynData.anchorPoints) {
-      this.dynData.anchorPoints.forEach((ap: any) => {
-        if (ap.label) addLbl(ap.label, new THREE.Vector3(ap.x, (ap.y || 0) + (ap.height ?? 20) + 100, sz(ap.z || 0)));
-      });
-    }
-
-    if (this.dynData.anchors) {
-      this.dynData.anchors.forEach((a: any) => {
-        if (a.label) {
-          const mx = (a.px + a.ax) / 2;
-          const mz = (a.pz + a.az) / 2;
-          addLbl(a.label, new THREE.Vector3(mx, 100, sz(mz)));
-        }
-      });
-    }
-
-    if (this.dynData.vanes) {
-      this.dynData.vanes.forEach((v, vi) => {
-        if (v.label) {
-          let labelPos: THREE.Vector3 | null = null;
-
-          // In 3D: vane API lines are already in scene coords (Z=-z_editor), read bbox directly.
-          if (this.viewMode === '3D') {
-            const group = this.vaneGroups.get(vi.toString());
-            if (group) {
-              const bbox = new THREE.Box3();
-              group.traverse((obj) => {
-                const line = obj as THREE.Line;
-                if (line.isLine && line.name === 'ContactWire') {
-                  const pos = line.geometry.attributes.position;
-                  if (pos) {
-                    for (let vi = 0; vi < pos.count; vi++) {
-                      bbox.expandByPoint(new THREE.Vector3(pos.getX(vi), pos.getY(vi), pos.getZ(vi)));
-                    }
-                  }
-                }
-              });
-              if (!bbox.isEmpty()) {
-                const center = new THREE.Vector3();
-                bbox.getCenter(center);
-                labelPos = center;
-              }
-            }
-          }
-
-          if (!labelPos) {
-            const mx = (v.x1 + v.x2) / 2, mz = (v.z1 + v.z2) / 2;
-            labelPos = new THREE.Vector3(mx, 120, sz(mz));
-          }
-
-          addLbl(v.label, labelPos);
-        }
-      });
-    }
-
-    // Dropper results (CW Height) - ONLY in 3D and only for the vane being edited
-    if (this.viewMode === '3D' && this.editingVaneKey !== null) {
-      const group = this.vaneGroups.get(this.editingVaneKey);
-      if (group) {
-        group.children.forEach((child) => {
-          if (child instanceof THREE.Line && child.userData.result) {
-            const res = child.userData.result;
-            const pos = child.geometry.attributes.position.array;
-            // pos is [x1, y1, z1, x2, y2, z2] in Scene coordinates (Z = -z_editor)
-            let v = new THREE.Vector3(pos[0], pos[1], pos[2]);
-            addLbl(`#${res.index + 1} CW: ${res.distance_cw_h.toFixed(3)}m`, v);
+          if (tr.length > 0 && tr[0].label) {
+            const mid = Math.floor(tr.length / 2);
+            const p = tr[mid];
+            addLbl(tr[0].label, new THREE.Vector3(p.x, (p.y || 0) + 100, sz(p.z)));
           }
         });
       }
-    }
+
+      if (this.dynData.cantilevers) {
+        this.dynData.cantilevers.forEach(c => {
+          const rawX = c.x2raw ?? c.x2;
+          const rawZ = c.z2raw ?? c.z2;
+
+          const dx = rawX - c.x1;
+          const dz = rawZ - c.z1;
+          const len = Math.hypot(dx, dz);
+          let finalX = rawX, finalZ = rawZ;
+          if (len > 0) {
+            const zz = (c as any).zigzag ?? 250;
+            finalX = rawX + (dx / len) * zz;
+            finalZ = rawZ + (dz / len) * zz;
+          }
+
+          const mx = (c.x1 + finalX) / 2;
+          const mz = (c.z1 + finalZ) / 2;
+
+          const perpOffset = 400;
+          let px = 0, pz = 0;
+          if (len > 0) {
+            px = (-dz / len) * perpOffset;
+            pz = (dx / len) * perpOffset;
+          }
+
+          if (c.label) {
+            addLbl(c.label, new THREE.Vector3(mx + px, 100, sz(mz + pz)));
+          }
+
+          if (this.viewMode === '2D') {
+            const zz = (c as any).zigzag ?? 250;
+            const angleDeg = Math.atan2(-dz, dx) * (180 / Math.PI);
+            const labelOffset = 400;
+            const lblX = len > 0 ? finalX + (dx / len) * labelOffset : finalX;
+            const lblZ = len > 0 ? finalZ + (dz / len) * labelOffset : finalZ;
+            addRotatedLbl(`${Math.round(zz)} mm`, new THREE.Vector3(lblX, 100, lblZ), angleDeg);
+          }
+        });
+      }
+
+      if (this.dynData.anchorPoints) {
+        this.dynData.anchorPoints.forEach((ap: any) => {
+          if (ap.label) addLbl(ap.label, new THREE.Vector3(ap.x, (ap.y || 0) + (ap.height ?? 20) + 100, sz(ap.z || 0)));
+        });
+      }
+
+      if (this.dynData.anchors) {
+        this.dynData.anchors.forEach((a: any) => {
+          if (a.label) {
+            const mx = (a.px + a.ax) / 2;
+            const mz = (a.pz + a.az) / 2;
+            addLbl(a.label, new THREE.Vector3(mx, 100, sz(mz)));
+          }
+        });
+      }
+
+      if (this.dynData.vanes) {
+        this.dynData.vanes.forEach((v, vi) => {
+          if (v.label) {
+            let labelPos: THREE.Vector3 | null = null;
+
+            // In 3D: vane API lines are already in scene coords (Z=-z_editor), read bbox directly.
+            if (this.viewMode === '3D') {
+              const group = this.vaneGroups.get(vi.toString());
+              if (group) {
+                const bbox = new THREE.Box3();
+                group.traverse((obj) => {
+                  const line = obj as THREE.Line;
+                  if (line.isLine && line.name === 'ContactWire') {
+                    const pos = line.geometry.attributes.position;
+                    if (pos) {
+                      for (let vi = 0; vi < pos.count; vi++) {
+                        bbox.expandByPoint(new THREE.Vector3(pos.getX(vi), pos.getY(vi), pos.getZ(vi)));
+                      }
+                    }
+                  }
+                });
+                if (!bbox.isEmpty()) {
+                  const center = new THREE.Vector3();
+                  bbox.getCenter(center);
+                  labelPos = center;
+                }
+              }
+            }
+
+            if (!labelPos) {
+              const mx = (v.x1 + v.x2) / 2, mz = (v.z1 + v.z2) / 2;
+              labelPos = new THREE.Vector3(mx, 120, sz(mz));
+            }
+
+            addLbl(v.label, labelPos);
+          }
+        });
+      }
+
+      // Dropper results (CW Height) - ONLY in 3D and only for the vane being edited
+      if (this.viewMode === '3D' && this.editingVaneKey !== null) {
+        const group = this.vaneGroups.get(this.editingVaneKey);
+        if (group) {
+          group.children.forEach((child) => {
+            if (child instanceof THREE.Line && child.userData.result) {
+              const res = child.userData.result;
+              const pos = child.geometry.attributes.position.array;
+              // pos is [x1, y1, z1, x2, y2, z2] in Scene coordinates (Z = -z_editor)
+              let v = new THREE.Vector3(pos[0], pos[1], pos[2]);
+              addLbl(`#${res.index + 1} CW: ${res.distance_cw_h.toFixed(3)}m`, v);
+            }
+          });
+        }
+      }
     } // End of !isFreeCam block
 
     // Pantograph zigzag and CW height label — attached to the pantograph during simulation
@@ -2754,7 +2789,7 @@ export class ViewerEngine {
 
   public async takeScreenshot(): Promise<string> {
     this.renderer.render(this.scene, this.viewMode === '2D' ? this.cam2D : this.cam3D);
-    
+
     // Create a composite canvas
     const canvas = document.createElement('canvas');
     canvas.width = this.renderer.domElement.width;
@@ -2765,31 +2800,73 @@ export class ViewerEngine {
     // Draw the 3D scene
     ctx.drawImage(this.renderer.domElement, 0, 0);
 
-    // Render HTML labels via SVG foreignObject
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">
-        <foreignObject width="100%" height="100%">
-          <div xmlns="http://www.w3.org/1999/xhtml" style="width: 100%; height: 100%; position: relative;">
-            ${this.labelsContainer.innerHTML}
-          </div>
-        </foreignObject>
-      </svg>
-    `;
-    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(svgBlob);
+    // Draw HTML labels manually using Canvas 2D API to avoid SVG foreignObject tainting
+    const labels = Array.from(this.labelsContainer.children) as HTMLElement[];
+    
+    labels.forEach(label => {
+      const text = label.textContent || '';
+      
+      // Extract position from style
+      const left = parseFloat(label.style.left || '0');
+      const top = parseFloat(label.style.top || '0');
+      
+      // Determine if it's a rotated/orange label (vane/cantilever) or a standard label
+      const isOrange = label.style.color === 'rgb(245, 158, 11)' || label.style.color === '#f59e0b';
+      
+      // Parse rotation if any
+      let rotation = 0;
+      const transform = label.style.transform || '';
+      const rotMatch = transform.match(/rotate\(([-\d.]+)deg\)/);
+      if (rotMatch) {
+        rotation = parseFloat(rotMatch[1]) * (Math.PI / 180);
+      }
+
+      ctx.save();
+      
+      // Move to the label's center position
+      ctx.translate(left, top);
+      if (rotation !== 0) ctx.rotate(rotation);
+      
+      ctx.font = '600 11px monospace';
+      const textMetrics = ctx.measureText(text);
+      const textWidth = textMetrics.width;
+      const paddingX = 6;
+      const paddingY = 2;
+      const height = 15; // approximate height for 11px font
+      
+      const boxWidth = textWidth + paddingX * 2;
+      const boxHeight = height + paddingY * 2;
+      
+      // Draw background box (transform(-50%, -50%) equivalent)
+      const boxX = -boxWidth / 2;
+      const boxY = -boxHeight / 2;
+      
+      if (isOrange) {
+        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.strokeStyle = 'rgba(245,158,11,0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.fillStyle = '#f59e0b';
+      } else {
+        ctx.fillStyle = 'rgba(15,23,42,0.8)';
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.strokeStyle = 'rgba(51,65,85,0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.fillStyle = '#ffffff';
+      }
+      
+      // Draw text
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 0, 0);
+      
+      ctx.restore();
+    });
 
     return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.src = url;
+      resolve(canvas.toDataURL('image/png'));
     });
   }
 }

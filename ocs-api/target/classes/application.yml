@@ -8,6 +8,10 @@ spring:
     username: ${DB_USERNAME:ocs_user}
     password: ${DB_PASSWORD:ocs_password}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      connection-timeout: 30000
 
   jpa:
     hibernate:

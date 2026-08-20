@@ -19,13 +19,11 @@
   <a href="#contact">Contact</a>
 </p>
 
----
-
 ## Demo
 
-<!-- Place your demo video in docs/images/demo.mp4 -->
+<!-- Direct GitHub Raw Video Embed -->
 <p align="center">
-  <video src="docs/images/demo.mp4" width="720" controls="controls" muted="muted" playsinline="playsinline"></video>
+  <video src="https://github.com/DiegoPevi05/ocs/raw/main/docs/images/demo.mp4" controls="controls" muted="muted" width="720"></video>
 </p>
 
 ---

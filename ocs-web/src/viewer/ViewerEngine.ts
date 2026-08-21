@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { ApiLine, ApiResponse, DrawMode, ViewMode } from '../types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -96,7 +97,21 @@ export class ViewerEngine {
   public simZigzag: number = 0;
   public simCWHeight: number = 5400;
   public chaseCamDistance: number = 8000;
-  private trainGroup?: THREE.Group;
+  public focusedTrainId: string | null = null;
+  private trainTemplate?: THREE.Group;
+  public trainInstances = new Map<string, {
+    group: THREE.Group;
+    progress: number;
+    speedMultiplier: number;
+    direction: 1 | -1;
+    isPlaying: boolean;
+    trackIndex: number;
+    trackCurve?: THREE.CatmullRomCurve3;
+    trackCantilevers?: { c: any; progress: number }[];
+    pantoGroup?: THREE.Object3D;
+    pantoHeadGroup?: THREE.Object3D;
+    pantoRestHeight: number;
+  }>();
   private pantoGroup?: THREE.Object3D;
   private pantoArmLower?: THREE.Object3D;
   private pantoArmUpperGroup?: THREE.Object3D;
@@ -1071,104 +1086,98 @@ export class ViewerEngine {
   }
 
   private initTrainPlaceholder() {
-    // Try loading GLB model first, fall back to simple geometry
-    this.trainGroup = new THREE.Group();
-    this.trainGroup.visible = false;
-    this.scene.add(this.trainGroup);
-
+    this.trainTemplate = new THREE.Group();
     const loader = new GLTFLoader();
     loader.load(
       '/models/train.glb',
       (gltf) => {
         const model = gltf.scene;
-
-        // GLB files are typically in meters — our scene is in mm, so scale ×1000
         model.scale.set(1000, 1000, 1000);
-
-        // Update world matrices so getWorldPosition works correctly after scaling
         model.updateMatrixWorld(true);
-
-        // Find the Pantograph group and its parts for IK animation
-        this.pantoGroup = model.getObjectByName('Pantograph') ?? undefined;
-        this.pantoArmLower = model.getObjectByName('PantographArmLower') ?? undefined;
-        this.pantoArmUpperGroup = model.getObjectByName('PantographArmUpperGroup') ?? undefined;
-        this.pantoHeadGroup = model.getObjectByName('PantographHeadGroup') ?? undefined;
-
-        // Find PantographHead (the part that touches the wire)
-        const pantoHead = model.getObjectByName('PantographHead');
-
-        if (pantoHead) {
-          // Compute rest height: how high PantographHead sits above trainGroup origin
-          const headWorld = new THREE.Vector3();
-          pantoHead.getWorldPosition(headWorld);
-          const modelWorld = new THREE.Vector3();
-          model.getWorldPosition(modelWorld);
-          this.pantoRestHeight = headWorld.y - modelWorld.y;
-          console.log(`[OCS] GLB loaded — PantographHead rest height: ${this.pantoRestHeight.toFixed(0)} mm`);
-        } else {
-          console.warn('[OCS] GLB loaded but PantographHead not found — pantograph tracking disabled');
-          this.pantoRestHeight = 5400;
-        }
-
-        if (!this.pantoGroup) {
-          console.warn('[OCS] GLB loaded but Pantograph group not found — will move PantographHead directly');
-        }
-
-        // Make all meshes cast/receive shadows and set layers for 3D
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
           }
-          child.layers.set(2); // Only visible in 3D mode
+          child.layers.set(2);
         });
-
-        // Clear placeholder geometry if any
-        while (this.trainGroup!.children.length) {
-          const c = this.trainGroup!.children[0] as any;
-          if (c.geometry) c.geometry.dispose();
-          if (c.material) {
-            if (Array.isArray(c.material)) c.material.forEach((m: any) => m.dispose());
-            else c.material.dispose();
-          }
-          this.trainGroup!.remove(c);
-        }
-
-        this.trainGroup!.add(model);
+        this.trainTemplate!.add(model);
         this.trainGlbLoaded = true;
-        console.log('[OCS] Train GLB model loaded successfully');
       },
       undefined,
       (err) => {
-        console.warn('[OCS] Failed to load train GLB, using placeholder geometry:', err);
-        this._buildPlaceholderTrain();
+        const bodyGeo = new THREE.BoxGeometry(2500, 3500, 15000);
+        bodyGeo.translate(0, 1750, 0);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8 });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.name = 'TrainBody';
+        this.trainTemplate!.add(body);
+        const pantoGeo = new THREE.BoxGeometry(2000, 100, 100);
+        const pantoMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+        const panto = new THREE.Mesh(pantoGeo, pantoMat);
+        panto.name = 'PantographHead';
+        panto.position.set(0, 5400, 0);
+        this.trainTemplate!.add(panto);
+        this.trainGlbLoaded = false;
       }
     );
-
-    // Build placeholder immediately (will be replaced if GLB loads)
-    this._buildPlaceholderTrain();
   }
 
-  private _buildPlaceholderTrain() {
-    if (!this.trainGroup) return;
-    const bodyGeo = new THREE.BoxGeometry(2500, 3500, 15000); // W=2.5m, H=3.5m, L=15m
-    bodyGeo.translate(0, 1750, 0); // Origin at bottom
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8 });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.name = 'TrainBody';
-    this.trainGroup.add(body);
+  public addTrain(id: string) {
+    if (!this.trainTemplate) return;
+    const group = SkeletonUtils.clone(this.trainTemplate) as THREE.Group;
+    this.scene.add(group);
+    
+    let pantoGroup, pantoHeadGroup;
+    let pantoRestHeight = 5400;
+    const pantoHead = group.getObjectByName('PantographHead');
+    if (pantoHead) {
+        group.updateMatrixWorld(true);
+        const headWorld = new THREE.Vector3();
+        pantoHead.getWorldPosition(headWorld);
+        const modelWorld = new THREE.Vector3();
+        group.getWorldPosition(modelWorld);
+        pantoRestHeight = headWorld.y - modelWorld.y;
+    }
+    pantoGroup = group.getObjectByName('Pantograph');
+    pantoHeadGroup = group.getObjectByName('PantographHeadGroup');
 
-    const pantoGeo = new THREE.BoxGeometry(2000, 100, 100);
-    const pantoMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
-    const panto = new THREE.Mesh(pantoGeo, pantoMat);
-    panto.name = 'PantographHead';
-    panto.position.set(0, 5400, 0); // ~5.4m high
-    this.trainGroup.add(panto);
-
-    this.pantoGroup = undefined;
-    this.pantoRestHeight = 5400;
-    this.trainGlbLoaded = false;
+    this.trainInstances.set(id, {
+        group,
+        pantoGroup,
+        pantoHeadGroup,
+        pantoRestHeight,
+        progress: 0,
+        speedMultiplier: 1,
+        direction: 1,
+        isPlaying: true,
+        trackIndex: 0
+    });
   }
+
+  public removeTrain(id: string) {
+    const t = this.trainInstances.get(id);
+    if (t) {
+        this.scene.remove(t.group);
+        this.trainInstances.delete(id);
+    }
+  }
+
+  public updateTrain(id: string, updates: Partial<{progress: number, speedMultiplier: number, direction: 1|-1, isPlaying: boolean, trackIndex: number}>) {
+    const t = this.trainInstances.get(id);
+    if (t) {
+        if (updates.progress !== undefined) t.progress = updates.progress;
+        if (updates.speedMultiplier !== undefined) t.speedMultiplier = updates.speedMultiplier;
+        if (updates.direction !== undefined) t.direction = updates.direction;
+        if (updates.isPlaying !== undefined) t.isPlaying = updates.isPlaying;
+        if (updates.trackIndex !== undefined) {
+          t.trackIndex = updates.trackIndex;
+          t.trackCurve = undefined;
+          t.trackCantilevers = undefined;
+        }
+    }
+  }
+
 
   // ─── Render loop ─────────────────────────────────────────────────────────────
 
@@ -1178,174 +1187,107 @@ export class ViewerEngine {
     requestAnimationFrame(this.loop);
 
     // Train Simulation Update
-    if (this.simState === 'playing' && this.trainGroup && this.trackCurve) {
-      this.simProgress += this.simSpeed;
-      if (this.simProgress > 1) this.simProgress = 0;
-
-      const pos = this.trackCurve.getPointAt(this.simProgress);
-      const tangent = this.trackCurve.getTangentAt(this.simProgress);
-
-      this.trainGroup.position.copy(pos);
-      const lookAtTarget = pos.clone().add(tangent);
-      this.trainGroup.lookAt(lookAtTarget);
-
-      // Calculate smooth contact wire height using inverse distance weighting of nearby cantilevers
-      let targetHeight = 5400;
-      if (this.dynData?.cantilevers?.length > 0) {
-        let totalWeight = 0;
-        let weightedSum = 0;
-        this.dynData.cantilevers.forEach((c: any) => {
-          const d = Math.max(1, Math.hypot(pos.x - c.x2, pos.z - (-(c.z2 ?? 0))));
-          if (d < 100000) { // Only consider cantilevers within 100m
-            const weight = 1 / Math.pow(d, 2);
-            weightedSum += (c.contactWireHeight ?? 5400) * weight;
-            totalWeight += weight;
-          }
-        });
-        if (totalWeight > 0) {
-          targetHeight = weightedSum / totalWeight;
+    if (this.simState !== 'stopped') {
+      for (const [id, t] of this.trainInstances.entries()) {
+        t.group.visible = true;
+        if (t.isPlaying) {
+          t.progress += 0.001 * t.speedMultiplier * t.direction;
+          if (t.progress > 1) t.progress -= 1;
+          if (t.progress < 0) t.progress += 1;
         }
-      }
 
-      this.simCWHeight = targetHeight;
+        this._getTrainTrack(t);
+        if (!t.trackCurve) continue;
+        const pos = t.trackCurve.getPointAt(t.progress);
+        const tangent = t.trackCurve.getTangentAt(t.progress);
+        const lookAtTarget = pos.clone().add(tangent);
 
-      // Animate pantograph to follow contact wire height
-      if (this.trainGlbLoaded) {
-        // GLB model: move the entire Pantograph group so all arms move together
-        const pantoHead = this.trainGroup.getObjectByName('PantographHead');
-        if (pantoHead) {
-          // Get current world Y of the pantograph head
-          const headWorld = new THREE.Vector3();
-          pantoHead.getWorldPosition(headWorld);
-          // Offset in millimeters (e.g. 50mm) to make the top of the carbon strip touch the wire,
-          // rather than the origin center of the PantographHead mesh.
-          const PANTO_CONTACT_OFFSET = -100;
-          const adjustedTargetHeight = targetHeight + PANTO_CONTACT_OFFSET;
+        t.group.position.copy(pos);
+        t.group.lookAt(lookAtTarget);
 
-          const currentRelY = headWorld.y - this.trainGroup.position.y;
-          const deltaY = adjustedTargetHeight - currentRelY;
+        let targetHeight = 5400;
+        let zigzagOffset = 0;
+        if (t.trackCantilevers && t.trackCantilevers.length > 0) {
+            let nextC = t.trackCantilevers.find(c => c.progress >= t.progress) || t.trackCantilevers[0];
+            let prevC = [...t.trackCantilevers].reverse().find(c => c.progress <= t.progress) || t.trackCantilevers[t.trackCantilevers.length - 1];
+            
+            if (nextC && prevC) {
+              let dist = nextC.progress - prevC.progress;
+              if (dist < 0) dist += 1;
+              let p = t.progress - prevC.progress;
+              if (p < 0) p += 1;
+              let ratio = dist === 0 ? 0 : p / dist;
+              
+              const h1 = prevC.c.contactWireHeight ?? 5400;
+              const h2 = nextC.c.contactWireHeight ?? 5400;
+              targetHeight = h1 + (h2 - h1) * ratio;
 
-          if (this.pantoGroup) {
-            // A robust way to "open" the pantograph without needing perfect bone pivots:
-            // We scale the whole pantograph group vertically to reach the target height.
-            // Since scaling squishes/stretches the geometry, we inversely scale the head so it stays its normal shape.
-            const baseWorld = new THREE.Vector3();
-            this.pantoGroup.getWorldPosition(baseWorld);
-            const pantoBaseY = baseWorld.y;
-
-            const desiredHeight = adjustedTargetHeight - (pantoBaseY - this.trainGroup.position.y);
-            const restHeight = this.pantoRestHeight - (pantoBaseY - this.trainGroup.position.y);
-
-            if (restHeight > 0 && desiredHeight > 0) {
-              const scaleY = desiredHeight / restHeight;
-              this.pantoGroup.scale.y += (scaleY - this.pantoGroup.scale.y) * 0.1;
-
-              if (this.pantoHeadGroup) {
-                this.pantoHeadGroup.scale.y = 1 / this.pantoGroup.scale.y;
-              }
+              const z1 = prevC.c.zigzag ?? 250;
+              const z2 = nextC.c.zigzag ?? -250;
+              zigzagOffset = z1 + (z2 - z1) * ratio;
             }
-          } else {
-            // Fallback: move PantographHead directly
-            pantoHead.position.y += (deltaY * 0.1) / 1000; // Convert mm back to model meters
-          }
-        }
-      } else {
-        // Placeholder: PantographHead is a direct child, set Y directly
-        const panto = this.trainGroup.getObjectByName('PantographHead');
-        if (panto) {
-          panto.position.y += (targetHeight - panto.position.y) * 0.1;
-        }
-      }
-
-      // Calculate real-time zigzag (lateral offset of contact wire from track center)
-      this.simZigzag = 0;
-      let foundZigzag = false;
-      let minZzDist = Infinity;
-
-      if (this.dynData?.vanes?.length > 0) {
-        this.dynData.vanes.forEach((v: any) => {
-          const Ax = v.x1, Az = v.z1;
-          const Bx = v.x2, Bz = v.z2;
-          const ABx = Bx - Ax, ABz = Bz - Az;
-
-          const denom = ABx * tangent.x + ABz * tangent.z;
-          if (Math.abs(denom) > 1e-6) {
-            const num = -((Ax - pos.x) * tangent.x + (Az - pos.z) * tangent.z);
-            const t = num / denom;
-
-            // Allow a tiny margin for t in case we are exactly at the cantilever
-            if (t >= -0.01 && t <= 1.01) {
-              const Cx = Ax + t * ABx;
-              const Cz = Az + t * ABz;
-
-              // Signed distance from pantograph center to contact point
-              // Normal vector N = (-tangent.z, tangent.x)
-              const dx = Cx - pos.x;
-              const dz = Cz - pos.z;
-              const signedDist = dx * (-tangent.z) + dz * tangent.x;
-
-              if (Math.abs(signedDist) < minZzDist && Math.abs(signedDist) < 2000) {
-                minZzDist = Math.abs(signedDist);
-                this.simZigzag = signedDist;
-                foundZigzag = true;
-              }
-            }
-          }
-        });
-      }
-
-      if (!foundZigzag) {
-        if (this.trackCantilevers.length >= 2) {
-          let behind = this.trackCantilevers[0];
-          let ahead = this.trackCantilevers[this.trackCantilevers.length - 1];
-
-          for (let i = 0; i < this.trackCantilevers.length - 1; i++) {
-            if (this.trackCantilevers[i].progress <= this.simProgress && this.trackCantilevers[i + 1].progress >= this.simProgress) {
-              behind = this.trackCantilevers[i];
-              ahead = this.trackCantilevers[i + 1];
-              break;
-            }
-          }
-
-          const progSpan = ahead.progress - behind.progress;
-          if (progSpan > 0) {
-            const t = (this.simProgress - behind.progress) / progSpan;
-            const zzBehind = behind.c.zigzag ?? 250;
-            const zzAhead = ahead.c.zigzag ?? 250;
-            this.simZigzag = zzBehind + (zzAhead - zzBehind) * t;
-          } else {
-            this.simZigzag = behind.c.zigzag ?? 250;
-          }
-        } else if (this.trackCantilevers.length === 1) {
-          this.simZigzag = this.trackCantilevers[0].c.zigzag ?? 250;
-        }
-      }
-
-      if (this.simCameraMode !== 'free' && this.viewMode === '3D') {
-        let offset = new THREE.Vector3();
-        
-        if (this.simCameraMode === 'chase') {
-          offset = tangent.clone().multiplyScalar(-this.chaseCamDistance);
-        } else if (this.simCameraMode === 'front') {
-          offset = tangent.clone().multiplyScalar(this.chaseCamDistance);
-        } else if (this.simCameraMode === 'side') {
-          // Cross product of tangent and UP vector gives a perpendicular vector (side)
-          offset = tangent.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(this.chaseCamDistance);
         }
         
-        offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
-        
-        // In side mode, we want to look at the train profile more level with the wire
-        if (this.simCameraMode === 'side') {
-           offset.y = targetHeight;
+        // Dispatch HUD events only for focused train
+        if (this.focusedTrainId === id) {
+            this.simCWHeight = targetHeight;
+            this.simZigzag = zigzagOffset;
+            this.container.dispatchEvent(new CustomEvent('viewer-hud', { 
+              detail: { zigzag: zigzagOffset, cwHeight: targetHeight }
+            }));
         }
 
-        const camPos = pos.clone().add(offset);
-        this.cam3D.position.lerp(camPos, 0.12);
+        // Adjust Pantograph geometry using Y-scaling hack
+        if (t.pantoGroup && t.pantoHeadGroup) {
+          const pantoBaseWorld = new THREE.Vector3();
+          t.pantoGroup.getWorldPosition(pantoBaseWorld);
+          
+          const currentRelY = t.pantoRestHeight;
+          const adjustedTargetHeight = targetHeight - 50; 
+          const desiredHeight = adjustedTargetHeight - (pantoBaseWorld.y - t.group.position.y);
+          
+          if (currentRelY > 0) {
+            const scaleY = desiredHeight / currentRelY;
+            t.pantoGroup.scale.set(1, scaleY, 1);
+            t.pantoHeadGroup.scale.set(1, 1 / scaleY, 1);
+          }
+        } else {
+          // Placeholder fallback
+          const panto = t.group.getObjectByName('PantographHead');
+          if (panto) {
+            panto.position.y += (targetHeight - panto.position.y) * 0.1;
+          }
+        }
+        
+        // Update camera if focused
+        if (this.focusedTrainId === id && this.simCameraMode !== 'free') {
+            let offset = new THREE.Vector3();
+            const adjustedTangent = tangent.clone().multiplyScalar(t.direction);
+            
+            if (this.simCameraMode === 'chase') {
+              offset = adjustedTangent.clone().multiplyScalar(-this.chaseCamDistance);
+            } else if (this.simCameraMode === 'front') {
+              offset = adjustedTangent.clone().multiplyScalar(this.chaseCamDistance);
+            } else if (this.simCameraMode === 'side') {
+              offset = adjustedTangent.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(this.chaseCamDistance);
+            }
+            
+            offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
+            if (this.simCameraMode === 'side') {
+               offset.y = targetHeight;
+            }
 
-        const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
-        this.controls.target.lerp(camTarget, 0.12);
+            const camPos = pos.clone().add(offset);
+            this.cam3D.position.lerp(camPos, 0.12);
+
+            const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
+            this.controls.target.lerp(camTarget, 0.12);
+        }
       }
+    } else {
+        for (const [id, t] of this.trainInstances.entries()) {
+            t.group.visible = false;
+        }
     }
 
     if (this.viewMode === '3D') {
@@ -1358,64 +1300,55 @@ export class ViewerEngine {
 
   // ─── Simulation Controls ─────────────────────────────────────────────────────
 
-  public setSimulationState(state: 'playing' | 'paused' | 'stopped') {
-    this.simState = state;
-    if (!this.trainGroup) return;
-
-    if (state === 'stopped') {
-      this.trainGroup.visible = false;
-      this.simProgress = 0;
-      this.trackCurve = undefined;
-    } else {
-      if (!this.trackCurve) {
+  private _getTrainTrack(t: any) {
+    if (!t.trackCurve) {
         let activeTrackPoints = null;
-
-        if (this.dynData?.selectedTracks?.length > 0) {
-          const idx = this.dynData.selectedTracks[0];
-          activeTrackPoints = this.dynData.completedTracks?.[idx];
-        } else if (this.dynData?.completedTracks?.length > 0) {
-          activeTrackPoints = this.dynData.completedTracks[0];
-        }
-
-        if (!activeTrackPoints && this.dynData?.trackPoints?.length >= 2) {
-          activeTrackPoints = this.dynData.trackPoints;
+        if (this.dynData?.completedTracks?.length > t.trackIndex) {
+            activeTrackPoints = this.dynData.completedTracks[t.trackIndex];
+        } else if (this.dynData?.trackPoints?.length >= 2) {
+            activeTrackPoints = this.dynData.trackPoints;
         }
 
         if (activeTrackPoints && activeTrackPoints.length >= 2) {
-          // Build the simulation curve using the same arc-sampling logic as rendering
-          const pts = this._buildSimTrackPts(activeTrackPoints);
-          if (pts.length >= 2) {
-            this.trackCurve = new THREE.CatmullRomCurve3(pts, false, 'chordal');
-
-            // Map cantilevers to track progress for accurate zigzag along curves
-            this.trackCantilevers = [];
-            if (this.dynData?.cantilevers) {
-              const lut = this.trackCurve.getSpacedPoints(200); // 200 samples along track
-              this.dynData.cantilevers.forEach((c: any) => {
-                const cx = c.x2 ?? c.x2raw ?? c.x1;
-                const cz = c.z2 ?? c.z2raw ?? c.z1;
-                let minDist = Infinity;
-                let minIdx = -1;
-                for (let i = 0; i < lut.length; i++) {
-                  const d = Math.hypot(cx - lut[i].x, cz - lut[i].z);
-                  if (d < minDist) { minDist = d; minIdx = i; }
+            const pts = this._buildSimTrackPts(activeTrackPoints);
+            if (pts.length >= 2) {
+                t.trackCurve = new THREE.CatmullRomCurve3(pts, false, 'chordal');
+                t.trackCantilevers = [];
+                if (this.dynData?.cantilevers) {
+                    const lut = t.trackCurve.getSpacedPoints(200);
+                    this.dynData.cantilevers.forEach((c: any) => {
+                        const cx = c.x2 ?? c.x2raw ?? c.x1;
+                        const cz = c.z2 ?? c.z2raw ?? c.z1;
+                        let minDist = Infinity;
+                        let minIdx = -1;
+                        for (let i = 0; i < lut.length; i++) {
+                            const d = Math.hypot(cx - lut[i].x, cz - lut[i].z);
+                            if (d < minDist) { minDist = d; minIdx = i; }
+                        }
+                        if (minDist < 50000) {
+                            t.trackCantilevers.push({ c, progress: minIdx / (lut.length - 1) });
+                        }
+                    });
+                    t.trackCantilevers.sort((a: any, b: any) => a.progress - b.progress);
                 }
-                if (minDist < 50000) { // Only consider cantilevers within 50m of this track
-                  this.trackCantilevers.push({ c, progress: minIdx / (lut.length - 1) });
-                }
-              });
-              this.trackCantilevers.sort((a, b) => a.progress - b.progress);
             }
-          }
         }
-      }
+    }
+    return t;
+  }
 
-      if (this.trackCurve) {
-        this.trainGroup.visible = true;
-      } else {
-        this.trainGroup.visible = false;
-        this.simState = 'stopped';
-      }
+  public setSimulationState(state: 'playing' | 'paused' | 'stopped') {
+    this.simState = state;
+    if (state === 'stopped') {
+        for (const t of this.trainInstances.values()) {
+            t.group.visible = false;
+            t.trackCurve = undefined;
+            t.trackCantilevers = undefined;
+        }
+    } else {
+        for (const t of this.trainInstances.values()) {
+            t.group.visible = true;
+        }
     }
   }
 

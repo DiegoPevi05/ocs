@@ -6,4 +6,7 @@ import java.util.UUID;
 
 public interface LocationRepository extends JpaRepository<Location, UUID> {
     List<Location> findByProjectId(UUID projectId);
+    
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project"})
+    java.util.Optional<Location> findWithProjectById(UUID id);
 }

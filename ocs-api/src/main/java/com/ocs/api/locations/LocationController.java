@@ -70,7 +70,7 @@ public class LocationController {
 
     @GetMapping("/api/locations/{id}/calculated")
     public reactor.core.publisher.Mono<ResponseEntity<com.fasterxml.jackson.databind.JsonNode>> getCalculatedLocation(@PathVariable UUID id) {
-        return locationRepository.findById(id).map(loc -> {
+        return locationRepository.findWithProjectById(id).map(loc -> {
             try {
                 com.fasterxml.jackson.databind.JsonNode sceneData = mapper.readTree(loc.getSceneData());
                 com.fasterxml.jackson.databind.JsonNode cantileversNode = sceneData.path("cantilevers");

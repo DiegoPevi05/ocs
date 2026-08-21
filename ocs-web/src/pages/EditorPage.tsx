@@ -110,6 +110,7 @@ function LegendItem({ color, label }: { color: string; label: string }) {
     <div className="legend-item">
       <span className="legend-dot" style={{ background: color }} />
       <span className="legend-label">{label}</span>
+
     </div>
   );
 }
@@ -123,6 +124,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         <h3 style={{ marginTop: 0 }}>{title}</h3>
         {children}
       </div>
+
     </div>
   );
 }
@@ -137,6 +139,7 @@ export default function EditorPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [viewMode, setViewMode] = useState<ViewMode>('2D');
   const [drawMode, setDrawMode] = useState<DrawMode>('none');
@@ -146,6 +149,8 @@ export default function EditorPage() {
 
   // Simulation state
   const [simState, setSimState] = useState<'stopped' | 'playing' | 'paused'>('stopped');
+  const [trains, setTrains] = useState<{ id: string, progress: number, speedMultiplier: number, direction: 1 | -1, isPlaying: boolean, cameraMode: 'free' | 'chase' | 'side' | 'front', trackIndex: number }[]>([]);
+
   const [simCameraMode, setSimCameraMode] = useState<'free' | 'chase' | 'side' | 'front'>('free');
   const [chaseCamDistance, setChaseCamDistance] = useState(8000);
   const [simZigzag, setSimZigzag] = useState(0);
@@ -366,7 +371,8 @@ export default function EditorPage() {
       })
       .catch(() => {
         api.locations.get(locationId).then(loc => { applyScene(loc); loadSettings(loc); }).catch(() => { });
-      });
+      })
+      .finally(() => setIsLoading(false));
 
     // Fetch platform AI enabled status (independent of project)
     fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api/platform/settings/ai-status`)
@@ -1274,6 +1280,9 @@ export default function EditorPage() {
     setViewMode(next);
     engineRef.current?.setViewMode(next);
     if (next === '3D') { setDrawMode('none'); engineRef.current?.setDrawMode('none'); }
+    if (next === '2D' && simState !== 'stopped') {
+      setSimState('stopped');
+    }
   };
 
   const selectDraw = (mode: DrawMode) => {
@@ -1516,62 +1525,19 @@ export default function EditorPage() {
           )}
 
           {simState !== 'stopped' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', background: '#1e293b', border: '1px solid #334155', borderRadius: 6, overflow: 'hidden' }}>
-                <button onClick={() => setSimState('playing')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simState === 'playing' ? '#166534' : 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <Play size={14} /> Play
-                </button>
-                <button onClick={() => setSimState('paused')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simState === 'paused' ? '#b45309' : 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <Pause size={14} /> Pause
-                </button>
-                <button onClick={() => setSimState('stopped')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  <Square size={14} fill="currentColor" /> Stop
-                </button>
-                {viewMode === '3D' && (
-                  <>
-                    <button onClick={() => {
-                      const modes: ('free'|'chase'|'side'|'front')[] = ['free', 'chase', 'side', 'front'];
-                      const next = modes[(modes.indexOf(simCameraMode) + 1) % modes.length];
-                      setSimCameraMode(next);
-                    }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: simCameraMode !== 'free' ? '#3b82f6' : 'transparent', borderLeft: '1px solid #334155', border: 'none', borderLeftStyle: 'solid', borderLeftWidth: 1, borderLeftColor: '#334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
-                      <Camera size={14} /> {simCameraMode.charAt(0).toUpperCase() + simCameraMode.slice(1)}
-                    </button>
-                    <button onClick={handleScreenshot} title="Download snapshot" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', background: 'transparent', border: 'none', borderLeft: '1px solid #334155', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}>
-                      <Download size={14} />
-                    </button>
-                  </>
-                )}
-              </div>
-              {viewMode === '3D' && simCameraMode !== 'free' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input
-                    type="range"
-                    min={1000}
-                    max={20000}
-                    step={500}
-                    value={chaseCamDistance}
-                    onChange={(e) => setChaseCamDistance(Number(e.target.value))}
-                    style={{ width: 80, accentColor: '#3b82f6' }}
-                    title={`Camera distance: ${(chaseCamDistance / 1000).toFixed(1)}m`}
-                  />
-                  <span style={{ color: '#94a3b8', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>{(chaseCamDistance / 1000).toFixed(1)}m</span>
-                </div>
-              )}
-              {simState !== 'stopped' && simCameraMode !== 'free' && viewMode === '3D' && (
-                <>
-                  <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>Zigzag:</span>
-                    <span style={{ color: '#f59e0b', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'monospace' }}>{Math.abs(simZigzag).toFixed(0)} mm {simZigzag > 0 ? 'R' : (simZigzag < 0 ? 'L' : '')}</span>
-                  </div>
-                  <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>CW Height:</span>
-                    <span style={{ color: '#3b82f6', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'monospace' }}>{simCWHeight.toFixed(0)} mm</span>
-                  </div>
-                </>
-              )}
-            </div>
+            <button onClick={() => setSimState('stopped')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: 'var(--danger)', border: '1px solid var(--danger)', color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
+              <Square size={14} fill="currentColor" /> Stop Simulation
+            </button>
           ) : (
-            <button onClick={() => setSimState('playing')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 6, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
+            <button onClick={() => {
+              setSimState('playing');
+              if (trains.length === 0) {
+                const id = 'train-' + Date.now();
+                setTrains([{ id, progress: 0, speedMultiplier: 1, direction: 1, isPlaying: false, cameraMode: 'free', trackIndex: 0 }]);
+                // We need to wait a tick for ViewerEngine to realize simState is 'playing' before adding train
+                setTimeout(() => { engineRef.current?.addTrain(id); engineRef.current?.updateTrain(id, { isPlaying: false }); }, 50);
+              }
+            }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 6, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>
               <TrainFront size={14} /> Simulation
             </button>
           )}
@@ -1690,6 +1656,14 @@ export default function EditorPage() {
 
         <main className="ocs-canvas-wrap">
           <div ref={containerRef} className="ocs-canvas" />
+          {isLoading && (
+            <div style={{ position: 'absolute', inset: 0, background: '#0f172a', zIndex: 100, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#3b82f6' }}>
+              <div style={{ width: 40, height: 40, border: '4px solid rgba(59,130,246,0.3)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: 16 }}></div>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              <div style={{ color: '#f8fafc', fontWeight: 600, fontSize: 16, letterSpacing: '0.05em' }}>Loading Scene...</div>
+              <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 8 }}>Fetching catenary models and calculating mechanics</div>
+            </div>
+          )}
           <div className="canvas-badge">
             {viewMode === '2D'
               ? <><span className="canvas-badge__mode">2D</span><span className="canvas-badge__hint">Scroll: zoom · Right-drag: pan{drawMode !== 'none' && ` · Drawing: ${drawMode}`}</span></>
@@ -2088,6 +2062,118 @@ export default function EditorPage() {
             }
           }}
         />
+      )}
+
+      {simState !== 'stopped' && (
+        <div style={{ position: 'absolute', top: 60, right: 20, width: 320, background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: 12, zIndex: 100, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: '0.9rem', color: '#f8fafc' }}>Simulation Trains</h3>
+            <button 
+              onClick={() => {
+                const id = 'train-' + Date.now();
+                setTrains(prev => [...prev, { id, progress: 0, speedMultiplier: 1, direction: 1, isPlaying: true, cameraMode: 'free', trackIndex: 0 }]);
+                engineRef.current?.addTrain(id);
+              }}
+              style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}
+            >
+              + Add Train
+            </button>
+          </div>
+          {trains.map((train, i) => (
+            <div key={train.id} style={{ background: '#0f172a', padding: 8, borderRadius: 6, border: '1px solid #334155' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Train {i + 1}</span>
+                <button onClick={() => {
+                  setTrains(prev => prev.filter(t => t.id !== train.id));
+                  engineRef.current?.removeTrain(train.id);
+                  if (engineRef.current?.focusedTrainId === train.id) engineRef.current.focusedTrainId = null;
+                }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                <button onClick={() => {
+                  const newPlaying = !train.isPlaying;
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, isPlaying: newPlaying } : t));
+                  engineRef.current?.updateTrain(train.id, { isPlaying: newPlaying });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: train.isPlaying ? '#166534' : '#334155', color: 'white', border: 'none', borderRadius: 4 }}>
+                  {train.isPlaying ? 'Pause' : 'Play'}
+                </button>
+                <button onClick={() => {
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, progress: 0, isPlaying: false } : t));
+                  engineRef.current?.updateTrain(train.id, { progress: 0, isPlaying: false });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#334155', color: 'white', border: 'none', borderRadius: 4 }}>
+                  Stop
+                </button>
+                <button onClick={() => {
+                  const newDir = train.direction === 1 ? -1 : 1;
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, direction: newDir } : t));
+                  engineRef.current?.updateTrain(train.id, { direction: newDir });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#334155', color: 'white', border: 'none', borderRadius: 4 }}>
+                  Rev
+                </button>
+                <button onClick={() => {
+                  const newSpeed = train.speedMultiplier * 1.5;
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, speedMultiplier: newSpeed } : t));
+                  engineRef.current?.updateTrain(train.id, { speedMultiplier: newSpeed });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#334155', color: 'white', border: 'none', borderRadius: 4 }}>+</button>
+                <button onClick={() => {
+                  const newSpeed = train.speedMultiplier / 1.5;
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, speedMultiplier: newSpeed } : t));
+                  engineRef.current?.updateTrain(train.id, { speedMultiplier: newSpeed });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#334155', color: 'white', border: 'none', borderRadius: 4 }}>-</button>
+                <button onClick={() => {
+                  const p = train.progress - (0.001 * train.direction);
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, progress: p } : t));
+                  engineRef.current?.updateTrain(train.id, { progress: p });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#334155', color: 'white', border: 'none', borderRadius: 4 }}>Prev</button>
+                <button onClick={() => {
+                  const p = train.progress + (0.001 * train.direction);
+                  setTrains(prev => prev.map(t => t.id === train.id ? { ...t, progress: p } : t));
+                  engineRef.current?.updateTrain(train.id, { progress: p });
+                }} style={{ padding: '4px 8px', fontSize: '0.7rem', background: '#334155', color: 'white', border: 'none', borderRadius: 4 }}>Next</button>
+              </div>
+              
+              <div style={{ marginTop: 8, display: 'flex', gap: 4, alignItems: 'center' }}>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Track:</span>
+                <select 
+                  value={train.trackIndex}
+                  onChange={(e) => {
+                    const idx = parseInt(e.target.value);
+                    setTrains(prev => prev.map(t => t.id === train.id ? { ...t, trackIndex: idx } : t));
+                    engineRef.current?.updateTrain(train.id, { trackIndex: idx });
+                  }}
+                  style={{ background: '#334155', color: 'white', border: 'none', borderRadius: 4, padding: '2px 4px', fontSize: '0.7rem' }}
+                >
+                  {completedTracks?.map((_, idx) => (
+                    <option key={idx} value={idx}>Track {idx + 1}</option>
+                  )) || <option value={0}>Track 1</option>}
+                </select>
+              </div>
+              <div style={{ marginTop: 4, display: 'flex', gap: 4, alignItems: 'center' }}>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Cam:</span>
+                {['free', 'chase', 'side', 'front'].map(mode => (
+                  <button key={mode} onClick={() => {
+                    setTrains(prev => prev.map(t => {
+                      if (t.id === train.id) return { ...t, cameraMode: mode as any };
+                      if (mode !== 'free') return { ...t, cameraMode: 'free' };
+                      return t;
+                    }));
+                    if (engineRef.current) {
+                      if (mode !== 'free') {
+                        engineRef.current.focusedTrainId = train.id;
+                        engineRef.current.simCameraMode = mode as any;
+                      } else if (engineRef.current.focusedTrainId === train.id) {
+                        engineRef.current.focusedTrainId = null;
+                        engineRef.current.simCameraMode = 'free';
+                      }
+                    }
+                  }} style={{ padding: '2px 6px', fontSize: '0.7rem', background: train.cameraMode === mode ? '#3b82f6' : '#334155', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

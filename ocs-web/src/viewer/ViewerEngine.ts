@@ -1205,29 +1205,118 @@ export class ViewerEngine {
         t.group.position.copy(pos);
         t.group.lookAt(lookAtTarget);
 
+        // Calculate smooth contact wire height using inverse distance weighting of nearby cantilevers
         let targetHeight = 5400;
-        let zigzagOffset = 0;
-        if (t.trackCantilevers && t.trackCantilevers.length > 0) {
-            let nextC = t.trackCantilevers.find(c => c.progress >= t.progress) || t.trackCantilevers[0];
-            let prevC = [...t.trackCantilevers].reverse().find(c => c.progress <= t.progress) || t.trackCantilevers[t.trackCantilevers.length - 1];
-            
-            if (nextC && prevC) {
-              let dist = nextC.progress - prevC.progress;
-              if (dist < 0) dist += 1;
-              let p = t.progress - prevC.progress;
-              if (p < 0) p += 1;
-              let ratio = dist === 0 ? 0 : p / dist;
-              
-              const h1 = prevC.c.contactWireHeight ?? 5400;
-              const h2 = nextC.c.contactWireHeight ?? 5400;
-              targetHeight = h1 + (h2 - h1) * ratio;
-
-              const z1 = prevC.c.zigzag ?? 250;
-              const z2 = nextC.c.zigzag ?? -250;
-              zigzagOffset = z1 + (z2 - z1) * ratio;
+        if (this.dynData?.cantilevers?.length > 0) {
+          let totalWeight = 0;
+          let weightedSum = 0;
+          this.dynData.cantilevers.forEach((c: any) => {
+            const d = Math.max(1, Math.hypot(pos.x - c.x2, pos.z - (-(c.z2 ?? 0))));
+            if (d < 100000) { // Only consider cantilevers within 100m
+              const weight = 1 / Math.pow(d, 2);
+              weightedSum += (c.contactWireHeight ?? 5400) * weight;
+              totalWeight += weight;
             }
+          });
+          if (totalWeight > 0) {
+            targetHeight = weightedSum / totalWeight;
+          }
         }
-        
+
+        // Animate pantograph to follow contact wire height
+        if (t.pantoGroup && t.pantoHeadGroup) {
+          const pantoHead = t.group.getObjectByName('PantographHead');
+          if (pantoHead) {
+            const headWorld = new THREE.Vector3();
+            pantoHead.getWorldPosition(headWorld);
+            const PANTO_CONTACT_OFFSET = -100;
+            const adjustedTargetHeight = targetHeight + PANTO_CONTACT_OFFSET;
+
+            const baseWorld = new THREE.Vector3();
+            t.pantoGroup.getWorldPosition(baseWorld);
+            const pantoBaseY = baseWorld.y;
+
+            const desiredHeight = adjustedTargetHeight - (pantoBaseY - t.group.position.y);
+            const restHeight = t.pantoRestHeight - (pantoBaseY - t.group.position.y);
+
+            if (restHeight > 0 && desiredHeight > 0) {
+              const scaleY = desiredHeight / restHeight;
+              t.pantoGroup.scale.y += (scaleY - t.pantoGroup.scale.y) * 0.1;
+
+              if (t.pantoHeadGroup) {
+                t.pantoHeadGroup.scale.y = 1 / t.pantoGroup.scale.y;
+              }
+            }
+          }
+        } else {
+          // Placeholder: PantographHead is a direct child, set Y directly
+          const panto = t.group.getObjectByName('PantographHead');
+          if (panto) {
+            panto.position.y += (targetHeight - panto.position.y) * 0.1;
+          }
+        }
+
+        // Calculate real-time zigzag (lateral offset of contact wire from track center)
+        let zigzagOffset = 0;
+        let foundZigzag = false;
+        let minZzDist = Infinity;
+
+        if (this.dynData?.vanes?.length > 0) {
+          this.dynData.vanes.forEach((v: any) => {
+            const Ax = v.x1, Az = v.z1;
+            const Bx = v.x2, Bz = v.z2;
+            const ABx = Bx - Ax, ABz = Bz - Az;
+
+            const denom = ABx * tangent.x + ABz * tangent.z;
+            if (Math.abs(denom) > 1e-6) {
+              const num = -((Ax - pos.x) * tangent.x + (Az - pos.z) * tangent.z);
+              const vt = num / denom;
+
+              if (vt >= -0.01 && vt <= 1.01) {
+                const Cx = Ax + vt * ABx;
+                const Cz = Az + vt * ABz;
+
+                const dx = Cx - pos.x;
+                const dz = Cz - pos.z;
+                const signedDist = dx * (-tangent.z) + dz * tangent.x;
+
+                if (Math.abs(signedDist) < minZzDist && Math.abs(signedDist) < 2000) {
+                  minZzDist = Math.abs(signedDist);
+                  zigzagOffset = signedDist;
+                  foundZigzag = true;
+                }
+              }
+            }
+          });
+        }
+
+        if (!foundZigzag && t.trackCantilevers) {
+          if (t.trackCantilevers.length >= 2) {
+            let behind = t.trackCantilevers[0];
+            let ahead = t.trackCantilevers[t.trackCantilevers.length - 1];
+
+            for (let i = 0; i < t.trackCantilevers.length - 1; i++) {
+              if (t.trackCantilevers[i].progress <= t.progress && t.trackCantilevers[i + 1].progress >= t.progress) {
+                behind = t.trackCantilevers[i];
+                ahead = t.trackCantilevers[i + 1];
+                break;
+              }
+            }
+
+            const progSpan = ahead.progress - behind.progress;
+            if (progSpan > 0) {
+              const rt = (t.progress - behind.progress) / progSpan;
+              const zzBehind = behind.c.zigzag ?? 250;
+              const zzAhead = ahead.c.zigzag ?? 250;
+              zigzagOffset = zzBehind + (zzAhead - zzBehind) * rt;
+            } else {
+              zigzagOffset = behind.c.zigzag ?? 250;
+            }
+          } else if (t.trackCantilevers.length === 1) {
+            zigzagOffset = t.trackCantilevers[0].c.zigzag ?? 250;
+          }
+        }
+
         // Dispatch HUD events only for focused train
         if (this.focusedTrainId === id) {
             this.simCWHeight = targetHeight;
@@ -1235,28 +1324,6 @@ export class ViewerEngine {
             this.container.dispatchEvent(new CustomEvent('viewer-hud', { 
               detail: { zigzag: zigzagOffset, cwHeight: targetHeight }
             }));
-        }
-
-        // Adjust Pantograph geometry using Y-scaling hack
-        if (t.pantoGroup && t.pantoHeadGroup) {
-          const pantoBaseWorld = new THREE.Vector3();
-          t.pantoGroup.getWorldPosition(pantoBaseWorld);
-          
-          const currentRelY = t.pantoRestHeight;
-          const adjustedTargetHeight = targetHeight - 50; 
-          const desiredHeight = adjustedTargetHeight - (pantoBaseWorld.y - t.group.position.y);
-          
-          if (currentRelY > 0) {
-            const scaleY = desiredHeight / currentRelY;
-            t.pantoGroup.scale.set(1, scaleY, 1);
-            t.pantoHeadGroup.scale.set(1, 1 / scaleY, 1);
-          }
-        } else {
-          // Placeholder fallback
-          const panto = t.group.getObjectByName('PantographHead');
-          if (panto) {
-            panto.position.y += (targetHeight - panto.position.y) * 0.1;
-          }
         }
         
         // Update camera if focused

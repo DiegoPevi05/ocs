@@ -3,6 +3,7 @@
 #include <vector>
 #include <stdexcept>
 #include <chrono>
+#include <map>
 #include "httplib.h"
 #include "nlohmann/json.hpp"
 
@@ -12,6 +13,7 @@
 #include "assemblies/BracketTube.hpp"
 #include "assemblies/SteadyArm.hpp"
 #include "assemblies/RegisterArm.hpp"
+#include "assemblies/Reinforcement.hpp"
 #include "components/Pole3D.hpp"
 #include "components/Pole.hpp"
 #include "viewer/Viewer3D.hpp"
@@ -171,9 +173,43 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
             if (i % 2 != 0) iterSteady.alpha = -steadyArmAlpha;
             auto steadyArm = std::make_shared<assemblies::SteadyArm>(iterSteady, bracketTube, regArm);
             builder->addAssembly(stayTube).addAssembly(bracketTube).addAssembly(regArm).addAssembly(steadyArm);
+            
+            bool enableReinforcement = j.value("enableReinforcement", false);
+            if (enableReinforcement) {
+                double reinfUpperOffset = j.value("reinforcementUpperOffset", 150.0);
+                double reinfBottomOffset = j.value("reinforcementBottomOffset", 150.0);
+                assemblies::ReinforcementParams reinfParams;
+                reinfParams.tube = { 55.0, 6.0 };
+                reinfParams.upper_distance_offset = reinfUpperOffset;
+                reinfParams.upper_eye_clamp = { 79.0 };
+                reinfParams.upper_hook_end_fitting = { 132.0, 65.0 };
+                reinfParams.bottom_distance_offset = reinfBottomOffset;
+                reinfParams.bottom_eye_clamp = { 79.0 };
+                reinfParams.bottom_hook_end_fitting = { 132.0, 65.0 };
+                
+                auto reinf = std::make_shared<assemblies::Reinforcement>(reinfParams, stayTube, bracketTube, steadyArm);
+                builder->addAssembly(reinf);
+            }
         } else {
             auto steadyArm = std::make_shared<assemblies::SteadyArm>(steadyArmParams, bracketTube, nullptr);
             builder->addAssembly(stayTube).addAssembly(bracketTube).addAssembly(steadyArm);
+            
+            bool enableReinforcement = j.value("enableReinforcement", false);
+            if (enableReinforcement) {
+                double reinfUpperOffset = j.value("reinforcementUpperOffset", 150.0);
+                double reinfBottomOffset = j.value("reinforcementBottomOffset", 150.0);
+                assemblies::ReinforcementParams reinfParams;
+                reinfParams.tube = { 55.0, 6.0 };
+                reinfParams.upper_distance_offset = reinfUpperOffset;
+                reinfParams.upper_eye_clamp = { 79.0 };
+                reinfParams.upper_hook_end_fitting = { 132.0, 65.0 };
+                reinfParams.bottom_distance_offset = reinfBottomOffset;
+                reinfParams.bottom_eye_clamp = { 79.0 };
+                reinfParams.bottom_hook_end_fitting = { 132.0, 65.0 };
+                
+                auto reinf = std::make_shared<assemblies::Reinforcement>(reinfParams, stayTube, bracketTube, steadyArm);
+                builder->addAssembly(reinf);
+            }
         }
         poleOrchestrator.addCantilever(builder);
     }
@@ -202,8 +238,52 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
         for (const auto& r : builder->generateResults()) cResults.push_back(resultToJson(r));
         cObj["results"] = cResults;
         json cLines = json::array();
-        for (const auto& line : builder->getAssemblyLines()) cLines.push_back(line3dToJson(line));
+        auto assemblyLines = builder->getAssemblyLines();
+        for (const auto& line : assemblyLines) cLines.push_back(line3dToJson(line));
         cObj["lines"] = cLines;
+        
+        // Build dimension annotations from assembly lines grouped by name.
+        // For each unique name group, find the overall bounding start/end
+        // (the two points with the greatest distance) and produce a dimension.
+        {
+            std::map<std::string, std::vector<const viewer::Line3D*>> groups;
+            for (const auto& line : assemblyLines) {
+                if (line.radius > 0) // only measure tube segments
+                    groups[line.name].push_back(&line);
+            }
+            json dims = json::array();
+            for (const auto& [name, lineGroup] : groups) {
+                if (lineGroup.empty()) continue;
+                // Find the two endpoints furthest apart
+                math::Vec3 bestStart = lineGroup[0]->start;
+                math::Vec3 bestEnd = lineGroup[0]->end;
+                double maxDist = math::distanceBetween(bestStart, bestEnd);
+                // Collect all endpoints
+                std::vector<math::Vec3> pts;
+                for (const auto* l : lineGroup) {
+                    pts.push_back(l->start);
+                    pts.push_back(l->end);
+                }
+                for (size_t a = 0; a < pts.size(); ++a) {
+                    for (size_t b = a + 1; b < pts.size(); ++b) {
+                        double d = math::distanceBetween(pts[a], pts[b]);
+                        if (d > maxDist) {
+                            maxDist = d;
+                            bestStart = pts[a];
+                            bestEnd = pts[b];
+                        }
+                    }
+                }
+                dims.push_back(json{
+                    {"name", name},
+                    {"start", vec3ToJson(bestStart)},
+                    {"end", vec3ToJson(bestEnd)},
+                    {"length", std::round(maxDist)}
+                });
+            }
+            cObj["dimensions"] = dims;
+        }
+        
         // Real attachment points (post tilt/elevation solve) — consumers (e.g. vane
         // wiring) should anchor to these instead of re-deriving an approximation.
         cObj["cwAxis"] = vec3ToJson(builder->getCwAxis());

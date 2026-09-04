@@ -18,10 +18,18 @@ export interface ApiResult {
   thickness: number;
 }
 
+export interface ApiDimension {
+  name: string;
+  start: [number, number, number];
+  end: [number, number, number];
+  length: number;
+}
+
 export interface ApiCantilever {
   index: number;
   lines: ApiLine[];
   results: ApiResult[];
+  dimensions?: ApiDimension[];
   cwAxis?: [number, number, number]; // real contact-wire attachment point (scene coords, Z already negated)
   mwAxis?: [number, number, number]; // real messenger/support-wire attachment point
 }
@@ -98,6 +106,9 @@ export interface CantileverData {
   steadyArmAlpha?: number;             // degrees, default -2.0
   registerArmAlpha?: number;           // degrees, default 2.0
   steadyArmLength?: number;            // mm, default 1200
+  enableReinforcement?: boolean;       // whether to enable structural reinforcement
+  reinforcementUpperOffset?: number;   // mm, distance from stay tube isolator, default 150
+  reinforcementBottomOffset?: number;  // mm, distance from steady arm bracket, default 150
 }
 export interface VaneData {
   id?: string; label?: string;

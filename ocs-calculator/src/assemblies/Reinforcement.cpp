@@ -35,13 +35,16 @@ std::vector<TubeDimension> Reinforcement::generateResults(const CantileverFrame&
 std::vector<viewer::Line3D> Reinforcement::getRenderLines() const {
     if (upperFixedPoint.x == 0 && upperFixedPoint.y == 0 && upperFixedPoint.z == 0) return {};
     
+    const double tubeR = params.tube.d / 2.0;
     std::vector<viewer::Line3D> lines;
-    // Red for reinforcement links (255, 0, 0)
+    // Fittings / clamp links — rendered as thin lines (radius = 0)
     lines.push_back(viewer::Line3D("Reinforcement", upperEyeClampPoint, upperHookEndPoint, 34, 197, 94, 255));
     lines.push_back(viewer::Line3D("Reinforcement", bottomEyeClampPoint, bottomHookEndPoint, 34, 197, 94, 255));
+    // Hook end fitting stubs — thin lines
     lines.push_back(viewer::Line3D("Reinforcement", upperHookEndPoint, upperFixedPoint, 34, 197, 94, 255));
     lines.push_back(viewer::Line3D("Reinforcement", bottomFixedPoint, bottomHookEndPoint, 34, 197, 94, 255));
-    lines.push_back(viewer::Line3D("Reinforcement", upperFixedPoint, bottomFixedPoint, 34, 197, 94, 255));
+    // Main tube body — rendered as a 3D cylinder (radius > 0)
+    lines.push_back(viewer::Line3D("Reinforcement", upperFixedPoint, bottomFixedPoint, 34, 197, 94, 255, tubeR));
 
     return lines;
 }

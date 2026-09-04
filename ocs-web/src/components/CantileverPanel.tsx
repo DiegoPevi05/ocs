@@ -289,6 +289,31 @@ export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculat
             </Row>
           )}
 
+          <Divider label="Structural" />
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}>
+            <input
+              type="checkbox"
+              checked={form.enableReinforcement ?? false}
+              onChange={e => set('enableReinforcement', e.target.checked)}
+              style={{ cursor: 'pointer' }}
+            />
+            Enable Reinforcement
+          </label>
+
+          {(form.enableReinforcement) && (
+            <Row>
+              <Field label="Upper Offset (mm)" hint="From stay tube isolator">
+                <input type="number" value={form.reinforcementUpperOffset ?? 150}
+                  onChange={e => set('reinforcementUpperOffset', +e.target.value)} style={INPUT} />
+              </Field>
+              <Field label="Bottom Offset (mm)" hint="From steady arm bracket">
+                <input type="number" value={form.reinforcementBottomOffset ?? 150}
+                  onChange={e => set('reinforcementBottomOffset', +e.target.value)} style={INPUT} />
+              </Field>
+            </Row>
+          )}
+
         </div>
         )}
 

@@ -600,6 +600,9 @@ export default function EditorPage() {
           steadyArmAlpha: c.steadyArmAlpha ?? -2,
           registerArmAlpha: c.registerArmAlpha ?? 2,
           steadyArmLength: c.steadyArmLength ?? 1200,
+          enableReinforcement: c.enableReinforcement ?? false,
+          reinforcementUpperOffset: c.reinforcementUpperOffset ?? 150,
+          reinforcementBottomOffset: c.reinforcementBottomOffset ?? 150,
         };
       });
       stompRef.current?.publish({ destination: '/app/calculate/batch', body: JSON.stringify(payloads) });

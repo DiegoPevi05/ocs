@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import type { ApiLine, ApiResponse, DrawMode, ViewMode } from '../types';
+import type { ApiDimension, ApiLine, ApiResponse, DrawMode, ViewMode } from '../types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1038,7 +1038,7 @@ export class ViewerEngine {
         // Adjust chaseCamDistance (zoom in/out) based on scroll
         const scrollAmount = e.deltaY > 0 ? 500 : -500;
         this.chaseCamDistance = Math.max(1000, Math.min(20000, this.chaseCamDistance + scrollAmount));
-        
+
         // Dispatch event so React UI can sync the slider
         this.container.dispatchEvent(new CustomEvent('viewer-cam-distance', {
           detail: { distance: this.chaseCamDistance }
@@ -1127,54 +1127,54 @@ export class ViewerEngine {
     if (!this.trainTemplate) return;
     const group = SkeletonUtils.clone(this.trainTemplate) as THREE.Group;
     this.scene.add(group);
-    
+
     let pantoGroup, pantoHeadGroup;
     let pantoRestHeight = 5400;
     const pantoHead = group.getObjectByName('PantographHead');
     if (pantoHead) {
-        group.updateMatrixWorld(true);
-        const headWorld = new THREE.Vector3();
-        pantoHead.getWorldPosition(headWorld);
-        const modelWorld = new THREE.Vector3();
-        group.getWorldPosition(modelWorld);
-        pantoRestHeight = headWorld.y - modelWorld.y;
+      group.updateMatrixWorld(true);
+      const headWorld = new THREE.Vector3();
+      pantoHead.getWorldPosition(headWorld);
+      const modelWorld = new THREE.Vector3();
+      group.getWorldPosition(modelWorld);
+      pantoRestHeight = headWorld.y - modelWorld.y;
     }
     pantoGroup = group.getObjectByName('Pantograph');
     pantoHeadGroup = group.getObjectByName('PantographHeadGroup');
 
     this.trainInstances.set(id, {
-        group,
-        pantoGroup,
-        pantoHeadGroup,
-        pantoRestHeight,
-        progress: 0,
-        speedMultiplier: 1,
-        direction: 1,
-        isPlaying: true,
-        trackIndex: 0
+      group,
+      pantoGroup,
+      pantoHeadGroup,
+      pantoRestHeight,
+      progress: 0,
+      speedMultiplier: 1,
+      direction: 1,
+      isPlaying: true,
+      trackIndex: 0
     });
   }
 
   public removeTrain(id: string) {
     const t = this.trainInstances.get(id);
     if (t) {
-        this.scene.remove(t.group);
-        this.trainInstances.delete(id);
+      this.scene.remove(t.group);
+      this.trainInstances.delete(id);
     }
   }
 
-  public updateTrain(id: string, updates: Partial<{progress: number, speedMultiplier: number, direction: 1|-1, isPlaying: boolean, trackIndex: number}>) {
+  public updateTrain(id: string, updates: Partial<{ progress: number, speedMultiplier: number, direction: 1 | -1, isPlaying: boolean, trackIndex: number }>) {
     const t = this.trainInstances.get(id);
     if (t) {
-        if (updates.progress !== undefined) t.progress = updates.progress;
-        if (updates.speedMultiplier !== undefined) t.speedMultiplier = updates.speedMultiplier;
-        if (updates.direction !== undefined) t.direction = updates.direction;
-        if (updates.isPlaying !== undefined) t.isPlaying = updates.isPlaying;
-        if (updates.trackIndex !== undefined) {
-          t.trackIndex = updates.trackIndex;
-          t.trackCurve = undefined;
-          t.trackCantilevers = undefined;
-        }
+      if (updates.progress !== undefined) t.progress = updates.progress;
+      if (updates.speedMultiplier !== undefined) t.speedMultiplier = updates.speedMultiplier;
+      if (updates.direction !== undefined) t.direction = updates.direction;
+      if (updates.isPlaying !== undefined) t.isPlaying = updates.isPlaying;
+      if (updates.trackIndex !== undefined) {
+        t.trackIndex = updates.trackIndex;
+        t.trackCurve = undefined;
+        t.trackCantilevers = undefined;
+      }
     }
   }
 
@@ -1211,7 +1211,9 @@ export class ViewerEngine {
           let totalWeight = 0;
           let weightedSum = 0;
           this.dynData.cantilevers.forEach((c: any) => {
-            const d = Math.max(1, Math.hypot(pos.x - c.x2, pos.z - (-(c.z2 ?? 0))));
+            const cx = c.x2raw ?? c.x2;
+            const cz = c.z2raw ?? c.z2;
+            const d = Math.max(1, Math.hypot(pos.x - cx, pos.z - cz));
             if (d < 100000) { // Only consider cantilevers within 100m
               const weight = 1 / Math.pow(d, 2);
               weightedSum += (c.contactWireHeight ?? 5400) * weight;
@@ -1319,42 +1321,42 @@ export class ViewerEngine {
 
         // Dispatch HUD events only for focused train
         if (this.focusedTrainId === id) {
-            this.simCWHeight = targetHeight;
-            this.simZigzag = zigzagOffset;
-            this.container.dispatchEvent(new CustomEvent('viewer-hud', { 
-              detail: { zigzag: zigzagOffset, cwHeight: targetHeight }
-            }));
+          this.simCWHeight = targetHeight;
+          this.simZigzag = zigzagOffset;
+          this.container.dispatchEvent(new CustomEvent('viewer-hud', {
+            detail: { zigzag: zigzagOffset, cwHeight: targetHeight }
+          }));
         }
-        
+
         // Update camera if focused
         if (this.focusedTrainId === id && this.simCameraMode !== 'free') {
-            let offset = new THREE.Vector3();
-            const adjustedTangent = tangent.clone().multiplyScalar(t.direction);
-            
-            if (this.simCameraMode === 'chase') {
-              offset = adjustedTangent.clone().multiplyScalar(-this.chaseCamDistance);
-            } else if (this.simCameraMode === 'front') {
-              offset = adjustedTangent.clone().multiplyScalar(this.chaseCamDistance);
-            } else if (this.simCameraMode === 'side') {
-              offset = adjustedTangent.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(this.chaseCamDistance);
-            }
-            
-            offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
-            if (this.simCameraMode === 'side') {
-               offset.y = targetHeight;
-            }
+          let offset = new THREE.Vector3();
+          const adjustedTangent = tangent.clone().multiplyScalar(t.direction);
 
-            const camPos = pos.clone().add(offset);
-            this.cam3D.position.lerp(camPos, 0.12);
+          if (this.simCameraMode === 'chase') {
+            offset = adjustedTangent.clone().multiplyScalar(-this.chaseCamDistance);
+          } else if (this.simCameraMode === 'front') {
+            offset = adjustedTangent.clone().multiplyScalar(this.chaseCamDistance);
+          } else if (this.simCameraMode === 'side') {
+            offset = adjustedTangent.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(this.chaseCamDistance);
+          }
 
-            const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
-            this.controls.target.lerp(camTarget, 0.12);
+          offset.y = targetHeight + (this.chaseCamDistance < 3000 ? 200 : 1500);
+          if (this.simCameraMode === 'side') {
+            offset.y = targetHeight;
+          }
+
+          const camPos = pos.clone().add(offset);
+          this.cam3D.position.lerp(camPos, 0.12);
+
+          const camTarget = pos.clone().add(new THREE.Vector3(0, targetHeight, 0));
+          this.controls.target.lerp(camTarget, 0.12);
         }
       }
     } else {
-        for (const [id, t] of this.trainInstances.entries()) {
-            t.group.visible = false;
-        }
+      for (const [id, t] of this.trainInstances.entries()) {
+        t.group.visible = false;
+      }
     }
 
     if (this.viewMode === '3D') {
@@ -1369,37 +1371,37 @@ export class ViewerEngine {
 
   private _getTrainTrack(t: any) {
     if (!t.trackCurve) {
-        let activeTrackPoints = null;
-        if (this.dynData?.completedTracks?.length > t.trackIndex) {
-            activeTrackPoints = this.dynData.completedTracks[t.trackIndex];
-        } else if (this.dynData?.trackPoints?.length >= 2) {
-            activeTrackPoints = this.dynData.trackPoints;
-        }
+      let activeTrackPoints = null;
+      if (this.dynData?.completedTracks?.length > t.trackIndex) {
+        activeTrackPoints = this.dynData.completedTracks[t.trackIndex];
+      } else if (this.dynData?.trackPoints?.length >= 2) {
+        activeTrackPoints = this.dynData.trackPoints;
+      }
 
-        if (activeTrackPoints && activeTrackPoints.length >= 2) {
-            const pts = this._buildSimTrackPts(activeTrackPoints);
-            if (pts.length >= 2) {
-                t.trackCurve = new THREE.CatmullRomCurve3(pts, false, 'chordal');
-                t.trackCantilevers = [];
-                if (this.dynData?.cantilevers) {
-                    const lut = t.trackCurve.getSpacedPoints(200);
-                    this.dynData.cantilevers.forEach((c: any) => {
-                        const cx = c.x2 ?? c.x2raw ?? c.x1;
-                        const cz = c.z2 ?? c.z2raw ?? c.z1;
-                        let minDist = Infinity;
-                        let minIdx = -1;
-                        for (let i = 0; i < lut.length; i++) {
-                            const d = Math.hypot(cx - lut[i].x, cz - lut[i].z);
-                            if (d < minDist) { minDist = d; minIdx = i; }
-                        }
-                        if (minDist < 50000) {
-                            t.trackCantilevers.push({ c, progress: minIdx / (lut.length - 1) });
-                        }
-                    });
-                    t.trackCantilevers.sort((a: any, b: any) => a.progress - b.progress);
-                }
-            }
+      if (activeTrackPoints && activeTrackPoints.length >= 2) {
+        const pts = this._buildSimTrackPts(activeTrackPoints);
+        if (pts.length >= 2) {
+          t.trackCurve = new THREE.CatmullRomCurve3(pts, false, 'chordal');
+          t.trackCantilevers = [];
+          if (this.dynData?.cantilevers) {
+            const lut = t.trackCurve.getSpacedPoints(200);
+            this.dynData.cantilevers.forEach((c: any) => {
+              const cx = c.x2 ?? c.x2raw ?? c.x1;
+              const cz = c.z2 ?? c.z2raw ?? c.z1;
+              let minDist = Infinity;
+              let minIdx = -1;
+              for (let i = 0; i < lut.length; i++) {
+                const d = Math.hypot(cx - lut[i].x, cz - lut[i].z);
+                if (d < minDist) { minDist = d; minIdx = i; }
+              }
+              if (minDist < 50000) {
+                t.trackCantilevers.push({ c, progress: minIdx / (lut.length - 1) });
+              }
+            });
+            t.trackCantilevers.sort((a: any, b: any) => a.progress - b.progress);
+          }
         }
+      }
     }
     return t;
   }
@@ -1407,15 +1409,15 @@ export class ViewerEngine {
   public setSimulationState(state: 'playing' | 'paused' | 'stopped') {
     this.simState = state;
     if (state === 'stopped') {
-        for (const t of this.trainInstances.values()) {
-            t.group.visible = false;
-            t.trackCurve = undefined;
-            t.trackCantilevers = undefined;
-        }
+      for (const t of this.trainInstances.values()) {
+        t.group.visible = false;
+        t.trackCurve = undefined;
+        t.trackCantilevers = undefined;
+      }
     } else {
-        for (const t of this.trainInstances.values()) {
-            t.group.visible = true;
-        }
+      for (const t of this.trainInstances.values()) {
+        t.group.visible = true;
+      }
     }
   }
 
@@ -1484,6 +1486,16 @@ export class ViewerEngine {
         const catGroup = new THREE.Group();
         catGroup.name = `cat_${offset + pi}_${ci}`;
         cat.lines.forEach((apiLine) => catGroup.add(this.makeApiLine(apiLine)));
+        // Render dimension annotations (measurement arrows + labels)
+        if (cat.dimensions && cat.dimensions.length > 0) {
+          const dimGroup = new THREE.Group();
+          dimGroup.name = `dim_${offset + pi}_${ci}`;
+          cat.dimensions.forEach((dim) => {
+            const objs = this.makeDimensionAnnotation(dim);
+            objs.forEach(o => dimGroup.add(o));
+          });
+          catGroup.add(dimGroup);
+        }
         poleGroup.add(catGroup);
       });
       this.dataGroup.add(poleGroup);
@@ -1537,6 +1549,62 @@ export class ViewerEngine {
     obj.userData.apiLine = apiLine;
     obj.layers.set(2);
     return obj;
+  }
+
+  private makeDimensionAnnotation(dim: ApiDimension): THREE.Object3D[] {
+    const start = new THREE.Vector3(dim.start[0], dim.start[1], dim.start[2]);
+    const end = new THREE.Vector3(dim.end[0], dim.end[1], dim.end[2]);
+    
+    // Offset the dimension slightly so it doesn't z-fight with the tube itself
+    const dir = end.clone().sub(start).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    let perp = new THREE.Vector3().crossVectors(dir, up).normalize();
+    if (perp.lengthSq() < 0.001) {
+      perp = new THREE.Vector3(1, 0, 0);
+    }
+    // Offset by 80mm
+    const offset = perp.multiplyScalar(80);
+    start.add(offset);
+    end.add(offset);
+    
+    const color = 0x0ea5e9; // sky blue
+    
+    // 1. Line
+    const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.8 }));
+    line.layers.set(2);
+    
+    // 2. Tick marks at start and end
+    const tickDir = perp.clone().normalize().multiplyScalar(30);
+    const tickGeo1 = new THREE.BufferGeometry().setFromPoints([start.clone().sub(tickDir), start.clone().add(tickDir)]);
+    const tickGeo2 = new THREE.BufferGeometry().setFromPoints([end.clone().sub(tickDir), end.clone().add(tickDir)]);
+    const tick1 = new THREE.Line(tickGeo1, new THREE.LineBasicMaterial({ color, depthTest: false }));
+    const tick2 = new THREE.Line(tickGeo2, new THREE.LineBasicMaterial({ color, depthTest: false }));
+    tick1.layers.set(2);
+    tick2.layers.set(2);
+    
+    // 3. Text label
+    const mid = start.clone().add(end).multiplyScalar(0.5);
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.font = 'bold 36px sans-serif';
+      ctx.fillStyle = '#0ea5e9';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${dim.name}: ${Math.round(dim.length)} mm`, 256, 64);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    const sprite = new THREE.Sprite(spriteMat);
+    // Scale sprite appropriately
+    sprite.scale.set(600, 150, 1);
+    sprite.position.copy(mid).add(new THREE.Vector3(0, 60, 0));
+    sprite.layers.set(2);
+    
+    return [line, tick1, tick2, sprite];
   }
 
   // ─── Dynamic UI Objects ───────────────────────────────────────────────────────
@@ -2479,30 +2547,33 @@ export class ViewerEngine {
       }
     } // End of !isFreeCam block
 
-    // Pantograph zigzag and CW height label — attached to the pantograph during simulation
-    if (this.simState !== 'stopped' && this.trainGroup?.visible && this.viewMode === '3D') {
-      const panto = this.trainGroup.getObjectByName('PantographHead');
-      if (panto) {
-        const worldPos = new THREE.Vector3();
-        panto.getWorldPosition(worldPos);
-        // Offset the label slightly above and to the right of the pantograph
-        worldPos.y += 400;
+    // Pantograph zigzag and CW height label — attached to each train's pantograph during simulation
+    if (this.simState !== 'stopped' && this.viewMode === '3D') {
+      for (const [id, t] of this.trainInstances.entries()) {
+        if (!t.group.visible) continue;
+        const panto = t.group.getObjectByName('PantographHead');
+        if (panto) {
+          const worldPos = new THREE.Vector3();
+          panto.getWorldPosition(worldPos);
+          // Offset the label slightly above the pantograph
+          worldPos.y += 400;
 
-        const clone = worldPos.clone();
-        clone.project(cam);
-        if (clone.z > -1 && clone.z < 1) {
-          const x = (clone.x * .5 + .5) * this.container.offsetWidth;
-          const y = (clone.y * -.5 + .5) * this.container.offsetHeight;
-          const div = document.createElement('div');
-          const side = this.simZigzag > 0 ? 'R' : (this.simZigzag < 0 ? 'L' : '');
-          div.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
-              <div><span style="opacity:.7;font-size:10px">Zigzag:</span> <b>${Math.abs(this.simZigzag).toFixed(0)}</b><span style="opacity:.7;font-size:10px"> mm ${side}</span></div>
-              <div><span style="opacity:.7;font-size:10px">CW Height:</span> <b>${this.simCWHeight.toFixed(0)}</b><span style="opacity:.7;font-size:10px"> mm</span></div>
-            </div>
-          `;
-          div.style.cssText = `position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-100%);background:rgba(180,83,9,0.9);border:1px solid rgba(245,158,11,0.7);color:#fef3c7;padding:4px 10px;border-radius:6px;font-size:12px;font-family:monospace;white-space:nowrap;pointer-events:none;letter-spacing:-0.3px;`;
-          this.labelsContainer.appendChild(div);
+          const clone = worldPos.clone();
+          clone.project(cam);
+          if (clone.z > -1 && clone.z < 1) {
+            const x = (clone.x * .5 + .5) * this.container.offsetWidth;
+            const y = (clone.y * -.5 + .5) * this.container.offsetHeight;
+            const div = document.createElement('div');
+            const side = this.simZigzag > 0 ? 'R' : (this.simZigzag < 0 ? 'L' : '');
+            div.innerHTML = `
+              <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                <div><span style="opacity:.7;font-size:10px">CW Height:</span> <b>${this.simCWHeight.toFixed(0)}</b><span style="opacity:.7;font-size:10px"> mm</span></div>
+                <div><span style="opacity:.7;font-size:10px">Zigzag:</span> <b>${Math.abs(this.simZigzag).toFixed(0)}</b><span style="opacity:.7;font-size:10px"> mm ${side}</span></div>
+              </div>
+            `;
+            div.style.cssText = `position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-100%);background:rgba(180,83,9,0.9);border:1px solid rgba(245,158,11,0.7);color:#fef3c7;padding:4px 10px;border-radius:6px;font-size:12px;font-family:monospace;white-space:nowrap;pointer-events:none;letter-spacing:-0.3px;`;
+            this.labelsContainer.appendChild(div);
+          }
         }
       }
     }
@@ -2802,17 +2873,17 @@ export class ViewerEngine {
 
     // Draw HTML labels manually using Canvas 2D API to avoid SVG foreignObject tainting
     const labels = Array.from(this.labelsContainer.children) as HTMLElement[];
-    
+
     labels.forEach(label => {
       const text = label.textContent || '';
-      
+
       // Extract position from style
       const left = parseFloat(label.style.left || '0');
       const top = parseFloat(label.style.top || '0');
-      
+
       // Determine if it's a rotated/orange label (vane/cantilever) or a standard label
       const isOrange = label.style.color === 'rgb(245, 158, 11)' || label.style.color === '#f59e0b';
-      
+
       // Parse rotation if any
       let rotation = 0;
       const transform = label.style.transform || '';
@@ -2822,25 +2893,25 @@ export class ViewerEngine {
       }
 
       ctx.save();
-      
+
       // Move to the label's center position
       ctx.translate(left, top);
       if (rotation !== 0) ctx.rotate(rotation);
-      
+
       ctx.font = '600 11px monospace';
       const textMetrics = ctx.measureText(text);
       const textWidth = textMetrics.width;
       const paddingX = 6;
       const paddingY = 2;
       const height = 15; // approximate height for 11px font
-      
+
       const boxWidth = textWidth + paddingX * 2;
       const boxHeight = height + paddingY * 2;
-      
+
       // Draw background box (transform(-50%, -50%) equivalent)
       const boxX = -boxWidth / 2;
       const boxY = -boxHeight / 2;
-      
+
       if (isOrange) {
         ctx.fillStyle = 'rgba(15,23,42,0.85)';
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
@@ -2856,12 +2927,12 @@ export class ViewerEngine {
         ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
         ctx.fillStyle = '#ffffff';
       }
-      
+
       // Draw text
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, 0, 0);
-      
+
       ctx.restore();
     });
 

@@ -88,4 +88,14 @@ math::Vec3 CantileverBuilder::getMwAxis() const {
     return {0, 0, 0};
 }
 
+math::Vec3 CantileverBuilder::getUpperPoleFixedPoint() const {
+    if (frame) return frame->upperPoleFixedPoint;
+    return {0, 0, 0};
+}
+
+math::Vec3 CantileverBuilder::getBottomPoleFixedPoint() const {
+    if (frame) return frame->bottomPoleFixedPoint;
+    return {0, 0, 0};
+}
+
 } // namespace catenary

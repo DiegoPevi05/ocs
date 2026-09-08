@@ -8,6 +8,7 @@ export interface ApiLine {
   name: string;
   start: [number, number, number]; // [x, y, z]
   radius?: number;                 // >0 = outer radius mm → render as 3D cylinder; 0/absent = wire line
+  utilization?: number;
 }
 
 export interface ApiResult {
@@ -16,6 +17,9 @@ export interface ApiResult {
   length: number;
   name: string;
   thickness: number;
+  axial_force?: number;
+  stress?: number;
+  utilization?: number;
 }
 
 export interface ApiDimension {

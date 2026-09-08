@@ -52,6 +52,9 @@ public:
     // superelevation tilt) — callers should use these instead of approximating.
     math::Vec3 getCwAxis() const;
     math::Vec3 getMwAxis() const;
+    
+    math::Vec3 getUpperPoleFixedPoint() const;
+    math::Vec3 getBottomPoleFixedPoint() const;
 };
 
 } // namespace catenary

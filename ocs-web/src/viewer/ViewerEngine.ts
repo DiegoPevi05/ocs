@@ -1509,11 +1509,50 @@ export class ViewerEngine {
     this.fitCamera();
   }
 
+  private stressMode: boolean = false;
+
+  private utilizationToHex(utilization: number): number {
+    const clamp = Math.max(0, Math.min(1, utilization));
+    let r, g, b;
+    if (clamp < 0.5) {
+      const t = clamp * 2.0;
+      r = 34 + t * (234 - 34);
+      g = 197 + t * (179 - 197);
+      b = 94 + t * (8 - 94);
+    } else {
+      const t = (clamp - 0.5) * 2.0;
+      r = 234 + t * (239 - 234);
+      g = 179 + t * (68 - 179);
+      b = 8 + t * (68 - 8);
+    }
+    return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+  }
+
+  public setStressViewMode(enabled: boolean): void {
+    this.stressMode = enabled;
+    this.dataGroup.traverse((obj) => {
+      if (obj.userData.apiLine) {
+        const line = obj.userData.apiLine as ApiLine;
+        const color = (this.stressMode && line.utilization !== undefined)
+          ? this.utilizationToHex(line.utilization)
+          : rgbaToHex(line.color);
+        
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshPhongMaterial) {
+          obj.material.color.setHex(color);
+        } else if (obj instanceof THREE.Line && obj.material instanceof THREE.LineBasicMaterial) {
+          obj.material.color.setHex(color);
+        }
+      }
+    });
+  }
+
   private makeApiLine(apiLine: ApiLine): THREE.Object3D {
     // 3D scene uses Z = -z_editor; backend already sends z_backend = -z_editor, so pass through directly.
     const start = new THREE.Vector3(apiLine.start[0], apiLine.start[1], apiLine.start[2]);
     const end = new THREE.Vector3(apiLine.end[0], apiLine.end[1], apiLine.end[2]);
-    const color = rgbaToHex(apiLine.color);
+    const color = (this.stressMode && apiLine.utilization !== undefined)
+      ? this.utilizationToHex(apiLine.utilization)
+      : rgbaToHex(apiLine.color);
 
     let obj: THREE.Object3D;
     if (apiLine.radius && apiLine.radius > 0) {

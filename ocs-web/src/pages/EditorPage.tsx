@@ -227,7 +227,9 @@ export default function EditorPage() {
   const [vaneFormPoleSysHeight, setVaneFormPoleSysHeight] = useState(1000);
 
   // Results overlay
-  const [lastCantResults, setLastCantResults] = useState<{ name: string; length: number; cut_length: number; diameter: number; thickness: number }[] | null>(null);
+  const [lastCantResults, setLastCantResults] = useState<{ name: string; length: number; cut_length: number; diameter: number; thickness: number; axial_force?: number; stress?: number; utilization?: number; }[] | null>(null);
+  const [stressTab, setStressTab] = useState(false);
+  const [stressHeatmap, setStressHeatmap] = useState(false);
   const [lastVaneResults, setLastVaneResults] = useState<{ index: number; dropper_length: number; distance_eye_to_eye: number; distance_cw: number; distance_pole_dropper: number; distance_dropper_dropper: number; distance_cw_h: number; dropper_inclination: number }[] | null>(null);
   const editCantileverIdxRef = useRef<number | null>(null);
   const editVaneIdxRef = useRef<number | null>(null);
@@ -1716,15 +1718,49 @@ export default function EditorPage() {
                 `}</style>
 
                 {/* Header */}
-                <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{
-                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                    background: editCantileverIdx !== null ? '#f59e0b' : '#9333ea',
-                  }} />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    {editCantileverIdx !== null ? 'Cantilever Results' : 'Vane Dropper Results'}
-                  </span>
-                  {!hasResults && <span style={{ marginLeft: 'auto', color: '#475569', fontStyle: 'italic', fontSize: 10 }}>awaiting calculation…</span>}
+                <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                      display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                      background: editCantileverIdx !== null ? '#f59e0b' : '#9333ea',
+                    }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {editCantileverIdx !== null ? 'Cantilever Results' : 'Vane Dropper Results'}
+                    </span>
+                  </div>
+                  
+                  {editCantileverIdx !== null && hasResults && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: 4, padding: 2 }}>
+                        <button
+                          onClick={() => setStressTab(false)}
+                          style={{
+                            padding: '2px 8px', fontSize: 10, cursor: 'pointer', borderRadius: 3, border: 'none',
+                            background: !stressTab ? 'rgba(255,255,255,0.1)' : 'transparent',
+                            color: !stressTab ? '#fff' : '#64748b'
+                          }}
+                        >Dims</button>
+                        <button
+                          onClick={() => setStressTab(true)}
+                          style={{
+                            padding: '2px 8px', fontSize: 10, cursor: 'pointer', borderRadius: 3, border: 'none',
+                            background: stressTab ? 'rgba(255,255,255,0.1)' : 'transparent',
+                            color: stressTab ? '#fff' : '#64748b'
+                          }}
+                        >Stress</button>
+                      </div>
+                      
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 10, color: '#94a3b8' }}>
+                        <input type="checkbox" checked={stressHeatmap} onChange={e => {
+                          setStressHeatmap(e.target.checked);
+                          if (engineRef.current) engineRef.current.setStressViewMode(e.target.checked);
+                        }} />
+                        Heatmap
+                      </label>
+                    </div>
+                  )}
+
+                  {!hasResults && <span style={{ color: '#475569', fontStyle: 'italic', fontSize: 10 }}>awaiting calculation…</span>}
                 </div>
 
                 {/* Cantilever parts table */}
@@ -1732,22 +1768,49 @@ export default function EditorPage() {
                   <div style={{ overflowX: 'auto' }}>
                     <table className="results-tbl">
                       <thead>
-                        <tr>
-                          <th>Part</th>
-                          <th>Length (mm)</th>
-                          <th>Cut (mm)</th>
-                          <th>∅ (mm)</th>
-                          <th>Thick (mm)</th>
-                        </tr>
+                        {stressTab ? (
+                          <tr>
+                            <th>Part</th>
+                            <th>Force (kN)</th>
+                            <th>Stress (MPa)</th>
+                            <th>Util</th>
+                          </tr>
+                        ) : (
+                          <tr>
+                            <th>Part</th>
+                            <th>Length (mm)</th>
+                            <th>Cut (mm)</th>
+                            <th>∅ (mm)</th>
+                            <th>Thick (mm)</th>
+                          </tr>
+                        )}
                       </thead>
                       <tbody>
                         {lastCantResults.map((r, i) => (
                           <tr key={i}>
-                            <td style={{ color: '#f59e0b' }}>{r.name}</td>
-                            <td>{r.length.toFixed(1)}</td>
-                            <td>{r.cut_length.toFixed(1)}</td>
-                            <td>{r.diameter.toFixed(1)}</td>
-                            <td>{r.thickness.toFixed(1)}</td>
+                            <td style={{ color: '#e2e8f0', fontWeight: 600 }}>{r.name}</td>
+                            {stressTab ? (
+                              <>
+                                <td style={{ color: r.axial_force! >= 0 ? '#38bdf8' : '#f87171' }}>
+                                  {r.axial_force !== undefined ? (r.axial_force / 1000).toFixed(2) : '-'}
+                                </td>
+                                <td>{r.stress !== undefined ? r.stress.toFixed(1) : '-'}</td>
+                                <td style={{ 
+                                  color: r.utilization !== undefined ? 
+                                    (r.utilization > 0.8 ? '#f87171' : (r.utilization > 0.4 ? '#fbbf24' : '#4ade80')) 
+                                    : '#94a3b8'
+                                }}>
+                                  {r.utilization !== undefined ? (r.utilization * 100).toFixed(1) + '%' : '-'}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td>{r.length.toFixed(1)}</td>
+                                <td style={{ color: '#38bdf8' }}>{r.cut_length.toFixed(1)}</td>
+                                <td style={{ color: '#94a3b8' }}>{r.diameter.toFixed(1)}</td>
+                                <td style={{ color: '#94a3b8' }}>{r.thickness.toFixed(1)}</td>
+                              </>
+                            )}
                           </tr>
                         ))}
                       </tbody>

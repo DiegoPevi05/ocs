@@ -37,6 +37,7 @@ FetchContent_MakeAvailable(httplib)
 add_library(catenary_lib STATIC
     src/math/Vec3.cpp
     src/math/MathUtils.cpp
+    src/math/TrussSolver.cpp
     src/components/Pole3D.cpp
     src/components/Pole.cpp
     src/components/CantileverFrame.cpp

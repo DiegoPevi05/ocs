@@ -4,6 +4,9 @@
 #include <stdexcept>
 #include <chrono>
 #include <map>
+#include <algorithm>
+#include <cctype>
+#include "math/TrussSolver.hpp"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
 
@@ -234,12 +237,89 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     for (const auto& builder : poleOrchestrator.cantilevers) {
         json cObj = json::object();
         cObj["index"] = cIndex++;
-        json cResults = json::array();
-        for (const auto& r : builder->generateResults()) cResults.push_back(resultToJson(r));
-        cObj["results"] = cResults;
-        json cLines = json::array();
+        // Set up Truss Solver
+        math::TrussSolver solver;
+        std::vector<math::Vec3> node_pos;
+        auto getOrAddNode = [&](const math::Vec3& p, bool isFixed) {
+            for (size_t i = 0; i < node_pos.size(); ++i) {
+                if (math::distanceBetween(node_pos[i], p) < 1.0) return (int)i;
+            }
+            node_pos.push_back(p);
+            return solver.addNode(p, isFixed);
+        };
+        
+        getOrAddNode(builder->getUpperPoleFixedPoint(), true);
+        getOrAddNode(builder->getBottomPoleFixedPoint(), true);
+        
         auto assemblyLines = builder->getAssemblyLines();
-        for (const auto& line : assemblyLines) cLines.push_back(line3dToJson(line));
+        std::vector<int> lineToElement(assemblyLines.size(), -1);
+        int el_id = 0;
+        for (size_t i = 0; i < assemblyLines.size(); ++i) {
+            const auto& line = assemblyLines[i];
+            int nA = getOrAddNode(line.start, false);
+            int nB = getOrAddNode(line.end, false);
+            if (nA == nB) continue;
+            
+            double E = 70000.0; // Aluminum
+            double A = 1000.0;
+            if (line.radius > 0) {
+                double s = 4.0; 
+                A = 3.14159265 * s * (2.0 * line.radius - s);
+            } else if (line.name.find("Cable") != std::string::npos || line.name.find("Wire") != std::string::npos) {
+                E = 200000.0; // Steel
+                A = 28.27; // 6mm diam
+            } else {
+                E = 2000000.0; // Rigid link
+            }
+            solver.addElement(el_id, line.name, nA, nB, E, A);
+            lineToElement[i] = el_id;
+            el_id++;
+        }
+        
+        int nCW = getOrAddNode(builder->getCwAxis(), false);
+        int nMW = getOrAddNode(builder->getMwAxis(), false);
+        solver.addLoad(nMW, {1000.0, -2000.0, 0.0});
+        solver.addLoad(nCW, {1500.0, -500.0, 0.0});
+        
+        auto trussResults = solver.solve(235.0);
+        
+        // Map max utilization per tube name to cResults
+        std::map<std::string, math::TrussResult> maxResultByName;
+        for (size_t i = 0; i < assemblyLines.size(); ++i) {
+            int eId = lineToElement[i];
+            if (eId >= 0 && eId < trussResults.size()) {
+                std::string name = assemblyLines[i].name;
+                std::string key = name;
+                std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+                for (char& c : key) if (c == ' ') c = '_';
+                
+                if (maxResultByName.find(key) == maxResultByName.end() || trussResults[eId].utilization > maxResultByName[key].utilization) {
+                    maxResultByName[key] = trussResults[eId];
+                }
+            }
+        }
+        
+        json cResults = json::array();
+        for (const auto& r : builder->generateResults()) {
+            json rJson = resultToJson(r);
+            if (maxResultByName.count(r.name)) {
+                rJson["axial_force"] = maxResultByName[r.name].axial_force;
+                rJson["stress"] = maxResultByName[r.name].stress;
+                rJson["utilization"] = maxResultByName[r.name].utilization;
+            }
+            cResults.push_back(rJson);
+        }
+        cObj["results"] = cResults;
+        
+        json cLines = json::array();
+        for (size_t i = 0; i < assemblyLines.size(); ++i) {
+            json lJson = line3dToJson(assemblyLines[i]);
+            int eId = lineToElement[i];
+            if (eId >= 0 && eId < trussResults.size()) {
+                lJson["utilization"] = trussResults[eId].utilization;
+            }
+            cLines.push_back(lJson);
+        }
         cObj["lines"] = cLines;
         
         // Build dimension annotations from assembly lines grouped by name.

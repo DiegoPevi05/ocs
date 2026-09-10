@@ -4,8 +4,10 @@
 #include <stdexcept>
 #include <chrono>
 #include <map>
+#include <unordered_map>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include "math/TrussSolver.hpp"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
@@ -113,20 +115,53 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     double registerArmAlpha = j.value("registerArmAlpha", defaultRegisterAlpha);
     double steadyArmLength = j.value("steadyArmLength", 1200.0);
 
+    // Wire/dropper loads carried by this cantilever, auto-derived by the frontend from the
+    // Vane(s) attached to it (half of each attached span's length, weight, and droppers).
+    // Falls back to typical single-span defaults if no vane is attached on a side.
+    double halfSpanLeft = j.value("halfSpanLeft", 30000.0);   // mm
+    double halfSpanRight = j.value("halfSpanRight", 30000.0); // mm
+    double cwTension = j.value("cwTension", 1600.0);   // N
+    double swTension = j.value("swTension", 2000.0);   // N
+    double cwWeight = j.value("cwWeight", 0.0019);      // kg/mm (matches VaneBuilder's own convention)
+    double swWeight = j.value("swWeight", 0.0024);      // kg/mm
+    double dropperWeightKg = j.value("dropperWeight", 0.0006); // kg
+    double dropperCountLeft = j.value("dropperCountLeft", 3.0);
+    double dropperCountRight = j.value("dropperCountRight", 3.0);
+    double curveRadius = j.value("curveRadius", 0.0); // mm, 0 = straight track
+
+    // Per-tube structural properties (cross-section + allowable stress), user-configurable
+    // from the Cantilever panel's "Structural" section. Defaults match the tube stock
+    // previously hardcoded here.
+    double stayTubeDiameter = j.value("stayTubeDiameter", 55.0);
+    double stayTubeThickness = j.value("stayTubeThickness", 3.5);
+    double stayTubeYield = j.value("stayTubeYield", 215.0);
+    double bracketTubeDiameter = j.value("bracketTubeDiameter", 70.0);
+    double bracketTubeThickness = j.value("bracketTubeThickness", 4.0);
+    double bracketTubeYield = j.value("bracketTubeYield", 215.0);
+    double steadyArmDiameter = j.value("steadyArmDiameter", 33.7);
+    double steadyArmThickness = j.value("steadyArmThickness", 2.5);
+    double steadyArmYield = j.value("steadyArmYield", 215.0);
+    double registerArmDiameter = j.value("registerArmDiameter", 33.7);
+    double registerArmThickness = j.value("registerArmThickness", 3.2);
+    double registerArmYield = j.value("registerArmYield", 215.0);
+    double reinforcementDiameter = j.value("reinforcementDiameter", 55.0);
+    double reinforcementThickness = j.value("reinforcementThickness", 6.0);
+    double reinforcementYield = j.value("reinforcementYield", 215.0);
+
     auto stayTubeParams = assemblies::StayTubeParams{
-        0.0, { 55.0, 3.5 }, { 60.0, 400.0, 350.0 }, 
+        0.0, { stayTubeDiameter, stayTubeThickness, stayTubeYield }, { 60.0, 400.0, 350.0 },
         { { 100.0, 200.0, 50.0, 50.0, 150.0 }, 100.0, 80.0 },
         { 50.0 }, { 30.0 }, { 40.0 }
     };
     auto bracketTubeParams = assemblies::BracketTubeParams{
-        { 70.0, 4.0 }, { 60.0, 400.0, 350.0 }, { 30.0 }, { 40.0 }, 
+        { bracketTubeDiameter, bracketTubeThickness, bracketTubeYield }, { 60.0, 400.0, 350.0 }, { 30.0 }, { 40.0 },
         { 150.0, 50.0, 100.0 }, { 50.0 }
     };
     auto steadyArmParams = assemblies::SteadyArmParams{
-        steadyArmAlpha, steadyArmLength, 100.0, 
+        steadyArmAlpha, steadyArmLength, 100.0,
         250.0, // eye_clamp_distance (for SBA)
         components::StainlessSteelWireRope{6.0}, // stainless_steel_wire_rope (for SBA)
-        { 33.7, 2.5 }, // tube
+        { steadyArmDiameter, steadyArmThickness, steadyArmYield }, // tube
         components::HookEndFitting{100.0, 20.0},
         components::HookEndClamp{50.0, 40.0, 10.0, 10.0},
         components::SwivelClip{40.0, 30.0, 15.0},
@@ -137,7 +172,7 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     regParams.alpha = registerArmAlpha;
     regParams.drop_bracket_distance = 150.0;
     regParams.eye_clamp_distance = 250.0;
-    regParams.tube = { 33.7, 3.2 };
+    regParams.tube = { registerArmDiameter, registerArmThickness, registerArmYield };
     regParams.stainless_steel_wire_rope = { 6.0 };
     regParams.drop_bracket = { 50.0, 100.0, 20.0, 30.0 };
     regParams.eye_clamp = { 35.0 };
@@ -182,7 +217,7 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
                 double reinfUpperOffset = j.value("reinforcementUpperOffset", 150.0);
                 double reinfBottomOffset = j.value("reinforcementBottomOffset", 150.0);
                 assemblies::ReinforcementParams reinfParams;
-                reinfParams.tube = { 55.0, 6.0 };
+                reinfParams.tube = { reinforcementDiameter, reinforcementThickness, reinforcementYield };
                 reinfParams.upper_distance_offset = reinfUpperOffset;
                 reinfParams.upper_eye_clamp = { 79.0 };
                 reinfParams.upper_hook_end_fitting = { 132.0, 65.0 };
@@ -202,7 +237,7 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
                 double reinfUpperOffset = j.value("reinforcementUpperOffset", 150.0);
                 double reinfBottomOffset = j.value("reinforcementBottomOffset", 150.0);
                 assemblies::ReinforcementParams reinfParams;
-                reinfParams.tube = { 55.0, 6.0 };
+                reinfParams.tube = { reinforcementDiameter, reinforcementThickness, reinforcementYield };
                 reinfParams.upper_distance_offset = reinfUpperOffset;
                 reinfParams.upper_eye_clamp = { 79.0 };
                 reinfParams.upper_hook_end_fitting = { 132.0, 65.0 };
@@ -236,7 +271,8 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     int cIndex = 0;
     for (const auto& builder : poleOrchestrator.cantilevers) {
         json cObj = json::object();
-        cObj["index"] = cIndex++;
+        int thisIndex = cIndex++;
+        cObj["index"] = thisIndex;
         // Set up Truss Solver
         math::TrussSolver solver;
         std::vector<math::Vec3> node_pos;
@@ -247,10 +283,37 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
             node_pos.push_back(p);
             return solver.addNode(p, isFixed);
         };
-        
+
         getOrAddNode(builder->getUpperPoleFixedPoint(), true);
         getOrAddNode(builder->getBottomPoleFixedPoint(), true);
-        
+
+        // Cross-section (diameter, thickness, yield) per named tube type, sourced from the
+        // per-cantilever Structural configuration parsed above. Anything else (fittings,
+        // cables) falls back to a generic steel value below.
+        struct TubeProps { double d; double s; double yield; };
+        auto tubeProps = [&](const std::string& name) -> TubeProps {
+            if (name == "Bracket Tube") return { bracketTubeDiameter, bracketTubeThickness, bracketTubeYield };
+            if (name == "Stay Tube") return { stayTubeDiameter, stayTubeThickness, stayTubeYield };
+            if (name == "Steady Arm") return { steadyArmDiameter, steadyArmThickness, steadyArmYield };
+            if (name == "Register Arm") return { registerArmDiameter, registerArmThickness, registerArmYield };
+            if (name == "Reinforcement") return { reinforcementDiameter, reinforcementThickness, reinforcementYield };
+            return { 50.0, 4.0, 215.0 };
+        };
+
+        const double ALU_DENSITY = 2.7e-6; // kg/mm^3
+        const double GRAV = 9.81; // m/s^2
+
+        json cForces = json::array();
+        auto pushForce = [&](const std::string& label, const std::string& kind, const math::Vec3& point, const math::Vec3& dir, double magnitude) {
+            if (magnitude <= 1e-6) return;
+            cForces.push_back(json{
+                {"label", label}, {"kind", kind},
+                {"point", vec3ToJson(point)},
+                {"direction", vec3ToJson(dir)},
+                {"magnitude", magnitude}
+            });
+        };
+
         auto assemblyLines = builder->getAssemblyLines();
         std::vector<int> lineToElement(assemblyLines.size(), -1);
         int el_id = 0;
@@ -259,46 +322,87 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
             int nA = getOrAddNode(line.start, false);
             int nB = getOrAddNode(line.end, false);
             if (nA == nB) continue;
-            
+
             double E = 70000.0; // Aluminum
             double A = 1000.0;
+            double yieldStress = 500.0; // generic rigid-fitting steel
             if (line.radius > 0) {
-                double s = 4.0; 
+                TubeProps tp = tubeProps(line.name);
+                double s = std::max(0.1, std::min(tp.s, line.radius - 0.5));
                 A = 3.14159265 * s * (2.0 * line.radius - s);
+                yieldStress = tp.yield;
             } else if (line.name.find("Cable") != std::string::npos || line.name.find("Wire") != std::string::npos) {
                 E = 200000.0; // Steel
                 A = 28.27; // 6mm diam
+                yieldStress = 400.0; // hard-drawn conductor alloy
             } else {
                 E = 2000000.0; // Rigid link
             }
-            solver.addElement(el_id, line.name, nA, nB, E, A);
+            solver.addElement(el_id, line.name, nA, nB, E, A, yieldStress);
             lineToElement[i] = el_id;
+
+            // Self-weight of the tube body itself, lumped half at each end node.
+            if (line.radius > 0) {
+                double L = math::distanceBetween(line.start, line.end);
+                double weightN = ALU_DENSITY * A * L * GRAV;
+                if (weightN > 1e-6) {
+                    solver.addLoad(nA, {0.0, -weightN / 2.0, 0.0});
+                    solver.addLoad(nB, {0.0, -weightN / 2.0, 0.0});
+                    math::Vec3 mid = math::scale(math::add(line.start, line.end), 0.5);
+                    pushForce(line.name + " Self-Weight", "tube-weight", mid, {0.0, -1.0, 0.0}, weightN);
+                }
+            }
             el_id++;
         }
-        
+
         int nCW = getOrAddNode(builder->getCwAxis(), false);
         int nMW = getOrAddNode(builder->getMwAxis(), false);
-        solver.addLoad(nMW, {1000.0, -2000.0, 0.0});
-        solver.addLoad(nCW, {1500.0, -500.0, 0.0});
-        
-        auto trussResults = solver.solve(235.0);
-        
+
+        // External wire/dropper loads: span data (halfSpanLeft/Right, weights, tensions,
+        // dropper counts) is auto-derived by the frontend from the Vane(s) actually
+        // attached to this cantilever. Zigzag/curve produce lateral force at the CW node;
+        // wire/dropper self-weight produce vertical force at the CW/MW nodes.
+        double halfSpanTotal = halfSpanLeft + halfSpanRight; // mm
+        double halfSpanAvg = halfSpanTotal / 2.0;
+        double signedZigzag = (thisIndex % 2 == 0) ? zigzag : -zigzag;
+        double F_zigzag = (halfSpanAvg > 1e-6) ? cwTension * (signedZigzag / halfSpanAvg) : 0.0;
+        double curveSign = (curveDir == components::CurveRadiusDirection::OUTSIDE) ? -1.0 : 1.0;
+        double F_curve = (curveRadius > 1e-6) ? curveSign * cwTension * (halfSpanTotal / curveRadius) : 0.0;
+        double F_cwWeight = cwWeight * halfSpanTotal * GRAV;
+        double F_swWeight = swWeight * halfSpanTotal * GRAV
+                           + (dropperCountLeft + dropperCountRight) * dropperWeightKg * GRAV;
+
+        math::Vec3 cwPoint = builder->getCwAxis();
+        math::Vec3 mwPoint = builder->getMwAxis();
+        solver.addLoad(nCW, {F_zigzag + F_curve, -F_cwWeight, 0.0});
+        solver.addLoad(nMW, {0.0, -F_swWeight, 0.0});
+
+        pushForce("Zigzag", "zigzag", cwPoint, {F_zigzag >= 0 ? 1.0 : -1.0, 0.0, 0.0}, std::abs(F_zigzag));
+        pushForce("Curve Radius", "curve", cwPoint, {F_curve >= 0 ? 1.0 : -1.0, 0.0, 0.0}, std::abs(F_curve));
+        pushForce("Contact Wire Weight", "wire-weight", cwPoint, {0.0, -1.0, 0.0}, F_cwWeight);
+        pushForce("Support Wire + Dropper Weight", "wire-weight", mwPoint, {0.0, -1.0, 0.0}, F_swWeight);
+
+        auto trussResults = solver.solve();
+        std::unordered_map<int, math::TrussResult> resultById;
+        for (const auto& tr : trussResults) resultById[tr.element_id] = tr;
+
         // Map max utilization per tube name to cResults
         std::map<std::string, math::TrussResult> maxResultByName;
         for (size_t i = 0; i < assemblyLines.size(); ++i) {
             int eId = lineToElement[i];
-            if (eId >= 0 && eId < trussResults.size()) {
+            auto it = (eId >= 0) ? resultById.find(eId) : resultById.end();
+            if (it != resultById.end()) {
                 std::string name = assemblyLines[i].name;
                 std::string key = name;
                 std::transform(key.begin(), key.end(), key.begin(), ::tolower);
                 for (char& c : key) if (c == ' ') c = '_';
-                
-                if (maxResultByName.find(key) == maxResultByName.end() || trussResults[eId].utilization > maxResultByName[key].utilization) {
-                    maxResultByName[key] = trussResults[eId];
+
+                if (maxResultByName.find(key) == maxResultByName.end() || it->second.utilization > maxResultByName[key].utilization) {
+                    maxResultByName[key] = it->second;
                 }
             }
         }
-        
+
         json cResults = json::array();
         for (const auto& r : builder->generateResults()) {
             json rJson = resultToJson(r);
@@ -310,17 +414,19 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
             cResults.push_back(rJson);
         }
         cObj["results"] = cResults;
-        
+
         json cLines = json::array();
         for (size_t i = 0; i < assemblyLines.size(); ++i) {
             json lJson = line3dToJson(assemblyLines[i]);
             int eId = lineToElement[i];
-            if (eId >= 0 && eId < trussResults.size()) {
-                lJson["utilization"] = trussResults[eId].utilization;
+            auto it = (eId >= 0) ? resultById.find(eId) : resultById.end();
+            if (it != resultById.end()) {
+                lJson["utilization"] = it->second.utilization;
             }
             cLines.push_back(lJson);
         }
         cObj["lines"] = cLines;
+        cObj["forces"] = cForces;
         
         // Build dimension annotations from assembly lines grouped by name.
         // For each unique name group, find the overall bounding start/end

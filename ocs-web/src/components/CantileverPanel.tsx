@@ -253,16 +253,22 @@ export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculat
           </Row>
 
           {/* Curve direction */}
-          <Field label="Curve Direction">
-            <select
-              value={form.curveRadiusDirection ?? 'inside'}
-              onChange={e => set('curveRadiusDirection', e.target.value)}
-              style={{ ...INPUT, cursor: 'pointer' }}
-            >
-              <option value="inside">Inside</option>
-              <option value="outside">Outside</option>
-            </select>
-          </Field>
+          <Row>
+            <Field label="Curve Direction">
+              <select
+                value={form.curveRadiusDirection ?? 'inside'}
+                onChange={e => set('curveRadiusDirection', e.target.value)}
+                style={{ ...INPUT, cursor: 'pointer' }}
+              >
+                <option value="inside">Inside</option>
+                <option value="outside">Outside</option>
+              </select>
+            </Field>
+            <Field label="Curve Radius (mm)" hint="0 = straight track">
+              <input type="number" value={form.curveRadius ?? 0}
+                onChange={e => set('curveRadius', +e.target.value)} style={INPUT} />
+            </Field>
+          </Row>
 
           <Divider label="Arm Geometry" />
 
@@ -289,7 +295,7 @@ export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculat
             </Row>
           )}
 
-          <Divider label="Structural" />
+          <Divider label="Reinforcement" />
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}>
             <input
@@ -313,6 +319,36 @@ export function CantileverPanel({ cantilever, catenarySystem, onSave, onCalculat
               </Field>
             </Row>
           )}
+
+          <Divider label="Structural (Stress Heatmap)" />
+
+          {([
+            { key: 'stayTube', label: 'Stay Tube', d: 55.0, s: 3.5 },
+            { key: 'bracketTube', label: 'Bracket Tube', d: 70.0, s: 4.0 },
+            { key: 'steadyArm', label: 'Steady Arm', d: 33.7, s: 2.5 },
+            ...((form.configuration === 'TDP>2.2' || form.configuration === 'CAI' || !form.configuration)
+              ? [{ key: 'registerArm', label: 'Register Arm', d: 33.7, s: 3.2 }] : []),
+            ...((form.enableReinforcement)
+              ? [{ key: 'reinforcement', label: 'Reinforcement', d: 55.0, s: 6.0 }] : []),
+          ] as { key: string; label: string; d: number; s: number }[]).map(t => (
+            <Row key={t.key}>
+              <Field label={`${t.label} ⌀ (mm)`}>
+                <input type="number" step="0.1"
+                  value={(form as any)[`${t.key}Diameter`] ?? t.d}
+                  onChange={e => setForm(f => ({ ...f, [`${t.key}Diameter`]: +e.target.value }))} style={INPUT} />
+              </Field>
+              <Field label="Thickness (mm)">
+                <input type="number" step="0.1"
+                  value={(form as any)[`${t.key}Thickness`] ?? t.s}
+                  onChange={e => setForm(f => ({ ...f, [`${t.key}Thickness`]: +e.target.value }))} style={INPUT} />
+              </Field>
+              <Field label="Yield Stress (MPa)">
+                <input type="number" step="1"
+                  value={(form as any)[`${t.key}Yield`] ?? 215}
+                  onChange={e => setForm(f => ({ ...f, [`${t.key}Yield`]: +e.target.value }))} style={INPUT} />
+              </Field>
+            </Row>
+          ))}
 
         </div>
         )}

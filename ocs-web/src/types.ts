@@ -29,11 +29,22 @@ export interface ApiDimension {
   length: number;
 }
 
+// One applied structural load (zigzag, curve radius, wire/dropper weight, tube self-weight),
+// with its point of application and direction so the viewer can draw it as an arrow.
+export interface ApiForce {
+  label: string;
+  kind: 'zigzag' | 'curve' | 'wire-weight' | 'tube-weight' | string;
+  point: [number, number, number];
+  direction: [number, number, number]; // unit vector
+  magnitude: number; // Newtons
+}
+
 export interface ApiCantilever {
   index: number;
   lines: ApiLine[];
   results: ApiResult[];
   dimensions?: ApiDimension[];
+  forces?: ApiForce[];
   cwAxis?: [number, number, number]; // real contact-wire attachment point (scene coords, Z already negated)
   mwAxis?: [number, number, number]; // real messenger/support-wire attachment point
 }
@@ -104,6 +115,7 @@ export interface CantileverData {
   bottomFixedHeight?: number;          // mm, default 800
   u?: number;                          // track superelevation mm, default 0
   curveRadiusDirection?: string;       // 'inside' | 'outside', default 'inside'
+  curveRadius?: number;                // mm, track curve radius for lateral load calc; 0 = straight, default 0
   trackGauge?: number;                 // mm, default 1435
   configuration?: string;              // "TDP>2.2" | "TDP<2.2" | "CAI" | "SBA"
   contactWireConfiguration?: 'SINGLE' | 'DOUBLE'; // per-cantilever override; inherits project setting
@@ -113,6 +125,13 @@ export interface CantileverData {
   enableReinforcement?: boolean;       // whether to enable structural reinforcement
   reinforcementUpperOffset?: number;   // mm, distance from stay tube isolator, default 150
   reinforcementBottomOffset?: number;  // mm, distance from steady arm bracket, default 150
+  // Structural properties — per-tube cross-section + allowable stress, used by the
+  // stress heatmap. Defaults match the tube stock the backend previously hardcoded.
+  stayTubeDiameter?: number; stayTubeThickness?: number; stayTubeYield?: number;
+  bracketTubeDiameter?: number; bracketTubeThickness?: number; bracketTubeYield?: number;
+  steadyArmDiameter?: number; steadyArmThickness?: number; steadyArmYield?: number;
+  registerArmDiameter?: number; registerArmThickness?: number; registerArmYield?: number;
+  reinforcementDiameter?: number; reinforcementThickness?: number; reinforcementYield?: number;
 }
 export interface VaneData {
   id?: string; label?: string;
@@ -129,9 +148,9 @@ export interface VaneData {
   qtyDroppers?: number;         // default 0 (auto-calculated by vane length)
   initialSeparation?: number;   // mm from each cantilever end to first/last dropper, default 5000
   // Physical — inherited from cantilevers by default, can be overridden
-  cwWeight?: number;      // kg/m, default 0.0019
+  cwWeight?: number;      // kg/mm, default 0.0019
   cwTension?: number;     // N, default 1600
-  swWeight?: number;      // kg/m, default 0.0024
+  swWeight?: number;      // kg/mm, default 0.0024
   swTension?: number;     // N, default 2000
   dropperWeight?: number; // default 0.0006
   liftingStartDistance?: number; // mm from start where lifting starts, default length/2

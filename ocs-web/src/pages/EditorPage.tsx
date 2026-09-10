@@ -230,6 +230,7 @@ export default function EditorPage() {
   const [lastCantResults, setLastCantResults] = useState<{ name: string; length: number; cut_length: number; diameter: number; thickness: number; axial_force?: number; stress?: number; utilization?: number; }[] | null>(null);
   const [stressTab, setStressTab] = useState(false);
   const [stressHeatmap, setStressHeatmap] = useState(false);
+  const [showForces, setShowForces] = useState(false);
   const [lastVaneResults, setLastVaneResults] = useState<{ index: number; dropper_length: number; distance_eye_to_eye: number; distance_cw: number; distance_pole_dropper: number; distance_dropper_dropper: number; distance_cw_h: number; dropper_inclination: number }[] | null>(null);
   const editCantileverIdxRef = useRef<number | null>(null);
   const editVaneIdxRef = useRef<number | null>(null);
@@ -441,7 +442,9 @@ export default function EditorPage() {
               triggerVaneCalcRef.current(vanesRef.current, cantileversRef.current);
             }
           }
-        } catch { /* ignore parse errors */ }
+        } catch (err) {
+          console.error('Failed to process /topic/calculation result:', err);
+        }
       });
 
       // Subscribe to vane calculation results
@@ -558,9 +561,18 @@ export default function EditorPage() {
       if (cantiList.length === 0) return;
 
       const projectWireConfig = projectSettingsRef.current.catenarySystem === 'DOUBLE_WIRE' ? 'DOUBLE' : 'SINGLE';
-      const payloads = cantiList.map(c => {
+      const payloads = cantiList.map((c, cIdx) => {
         const footX = c.x2raw ?? c.x2;
         const footZ = c.z2raw ?? c.z2;
+
+        // Structural load inputs: auto-derive span length, dropper count, and wire
+        // weight/tension from the Vane(s) actually attached to this cantilever, so the
+        // stress heatmap/force arrows reflect the real adjoining spans instead of a
+        // manually re-entered duplicate of that data.
+        const attachedVanes = vanesRef.current.filter(v => v.cantileverIdx1 === cIdx || v.cantileverIdx2 === cIdx);
+        const vaneHalfSpan = (v: VaneData) => Math.hypot(v.x2 - v.x1, v.z2 - v.z1) / 2;
+        const vaneHalfDroppers = (v: VaneData) => (v.qtyDroppers && v.qtyDroppers > 0 ? v.qtyDroppers : 7) / 2;
+        const refVane = attachedVanes[0];
         
         const matchPole = polesRef.current.find(p => {
           let pX = p.x;
@@ -594,6 +606,7 @@ export default function EditorPage() {
           bottomFixedHeight: c.bottomFixedHeight ?? 5440,
           u: c.u ?? 0,
           curveRadiusDirection: c.curveRadiusDirection ?? 'inside',
+          curveRadius: c.curveRadius ?? 0,
           trackGauge: c.trackGauge ?? 1435,
           cantileversQuantity: matchPole?.cantileversQuantity ?? 1,
           catSeparation: matchPole?.catSeparation ?? 720,
@@ -605,6 +618,32 @@ export default function EditorPage() {
           enableReinforcement: c.enableReinforcement ?? false,
           reinforcementUpperOffset: c.reinforcementUpperOffset ?? 150,
           reinforcementBottomOffset: c.reinforcementBottomOffset ?? 150,
+          // Structural (stress heatmap) — per-tube cross-section + yield
+          stayTubeDiameter: c.stayTubeDiameter ?? 55.0,
+          stayTubeThickness: c.stayTubeThickness ?? 3.5,
+          stayTubeYield: c.stayTubeYield ?? 215.0,
+          bracketTubeDiameter: c.bracketTubeDiameter ?? 70.0,
+          bracketTubeThickness: c.bracketTubeThickness ?? 4.0,
+          bracketTubeYield: c.bracketTubeYield ?? 215.0,
+          steadyArmDiameter: c.steadyArmDiameter ?? 33.7,
+          steadyArmThickness: c.steadyArmThickness ?? 2.5,
+          steadyArmYield: c.steadyArmYield ?? 215.0,
+          registerArmDiameter: c.registerArmDiameter ?? 33.7,
+          registerArmThickness: c.registerArmThickness ?? 3.2,
+          registerArmYield: c.registerArmYield ?? 215.0,
+          reinforcementDiameter: c.reinforcementDiameter ?? 55.0,
+          reinforcementThickness: c.reinforcementThickness ?? 6.0,
+          reinforcementYield: c.reinforcementYield ?? 215.0,
+          // Wire/dropper loads, auto-derived from attached vane(s) (fallback = single default span)
+          halfSpanLeft: attachedVanes[0] ? vaneHalfSpan(attachedVanes[0]) : 30000,
+          halfSpanRight: attachedVanes[1] ? vaneHalfSpan(attachedVanes[1]) : (attachedVanes[0] ? vaneHalfSpan(attachedVanes[0]) : 30000),
+          dropperCountLeft: attachedVanes[0] ? vaneHalfDroppers(attachedVanes[0]) : 3,
+          dropperCountRight: attachedVanes[1] ? vaneHalfDroppers(attachedVanes[1]) : (attachedVanes[0] ? vaneHalfDroppers(attachedVanes[0]) : 3),
+          cwWeight: refVane?.cwWeight ?? 0.0019,
+          swWeight: refVane?.swWeight ?? 0.0024,
+          dropperWeight: refVane?.dropperWeight ?? 0.0006,
+          cwTension: refVane?.cwTension ?? 1600,
+          swTension: refVane?.swTension ?? 2000,
         };
       });
       stompRef.current?.publish({ destination: '/app/calculate/batch', body: JSON.stringify(payloads) });
@@ -1400,11 +1439,27 @@ export default function EditorPage() {
       saveScene(completedTracksRef.current, polesRef.current, next, vanesRef.current);
       return next;
     });
-    setEditCantileverIdx(null);
-    setSelectedCantilevers([]);
-    setViewMode('2D');
-    engineRef.current?.setViewMode('2D');
-    engineRef.current?.resetCamera();
+    
+    // Create a simple visual toast feedback without exiting edit mode
+    const toast = document.createElement('div');
+    toast.textContent = 'Cantilever saved';
+    toast.style.position = 'absolute';
+    toast.style.top = '20px';
+    toast.style.left = '50%';
+    toast.style.transform = 'translateX(-50%)';
+    toast.style.background = '#10b981'; // Tailwind emerald-500
+    toast.style.color = 'white';
+    toast.style.padding = '8px 16px';
+    toast.style.borderRadius = '4px';
+    toast.style.zIndex = '9999';
+    toast.style.fontWeight = 'bold';
+    toast.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+    toast.style.transition = 'opacity 0.3s';
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 2000);
   };
 
   const handleCalculateFromPanel = (updated: CantileverData) => {
@@ -1711,7 +1766,7 @@ export default function EditorPage() {
                     to   { opacity: 1; transform: translateY(0); }
                   }
                   .results-tbl { border-collapse: collapse; width: 100%; }
-                  .results-tbl th { color: var(--muted); font-weight: 600; padding: 4px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+                  .results-tbl th { color: #fff; font-weight: 600; padding: 4px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
                   .results-tbl td { padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }
                   .results-tbl tr:last-child td { border-bottom: none; }
                   .results-tbl tr:hover td { background: rgba(255,255,255,0.03); }
@@ -1757,11 +1812,35 @@ export default function EditorPage() {
                         }} />
                         Heatmap
                       </label>
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 10, color: '#94a3b8' }}>
+                        <input type="checkbox" checked={showForces} onChange={e => {
+                          setShowForces(e.target.checked);
+                          if (engineRef.current) engineRef.current.setForcesVisible(e.target.checked);
+                        }} />
+                        Forces
+                      </label>
                     </div>
                   )}
 
                   {!hasResults && <span style={{ color: '#475569', fontStyle: 'italic', fontSize: 10 }}>awaiting calculation…</span>}
                 </div>
+
+                {/* Heatmap color legend — same Blue→Green→Yellow→Red stops as ViewerEngine.utilizationToHex */}
+                {editCantileverIdx !== null && stressHeatmap && (
+                  <div style={{ padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{
+                      height: 6, borderRadius: 3,
+                      background: 'linear-gradient(to right, #2563eb 0%, #22c55e 33%, #eab308 66%, #ef4444 100%)',
+                    }} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#fff', marginTop: 2 }}>
+                      <span>0%</span>
+                      <span>33%</span>
+                      <span>66%</span>
+                      <span>100% (yield)</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Cantilever parts table */}
                 {lastCantResults && lastCantResults.length > 0 && (
@@ -1794,7 +1873,7 @@ export default function EditorPage() {
                                 <td style={{ color: r.axial_force! >= 0 ? '#38bdf8' : '#f87171' }}>
                                   {r.axial_force !== undefined ? (r.axial_force / 1000).toFixed(2) : '-'}
                                 </td>
-                                <td>{r.stress !== undefined ? r.stress.toFixed(1) : '-'}</td>
+                                <td style={{ color: '#e2e8f0' }}>{r.stress !== undefined ? r.stress.toFixed(1) : '-'}</td>
                                 <td style={{ 
                                   color: r.utilization !== undefined ? 
                                     (r.utilization > 0.8 ? '#f87171' : (r.utilization > 0.4 ? '#fbbf24' : '#4ade80')) 
@@ -1805,7 +1884,7 @@ export default function EditorPage() {
                               </>
                             ) : (
                               <>
-                                <td>{r.length.toFixed(1)}</td>
+                                <td style={{ color: '#e2e8f0' }}>{r.length.toFixed(1)}</td>
                                 <td style={{ color: '#38bdf8' }}>{r.cut_length.toFixed(1)}</td>
                                 <td style={{ color: '#94a3b8' }}>{r.diameter.toFixed(1)}</td>
                                 <td style={{ color: '#94a3b8' }}>{r.thickness.toFixed(1)}</td>

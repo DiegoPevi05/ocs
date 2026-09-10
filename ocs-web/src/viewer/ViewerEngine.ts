@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import type { ApiDimension, ApiLine, ApiResponse, DrawMode, ViewMode } from '../types';
+import type { ApiDimension, ApiForce, ApiLine, ApiResponse, DrawMode, ViewMode } from '../types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1496,6 +1496,26 @@ export class ViewerEngine {
           });
           catGroup.add(dimGroup);
         }
+        // Render applied-force arrows (zigzag, curve, wire/dropper weight, tube self-weight).
+        // Never let a malformed force entry take down the rest of the cantilever draw.
+        if (cat.forces && cat.forces.length > 0) {
+          try {
+            const forceGroup = new THREE.Group();
+            forceGroup.name = `forces_${offset + pi}_${ci}`;
+            forceGroup.visible = this.forcesVisible;
+            cat.forces.forEach((f) => {
+              try {
+                const objs = this.makeForceArrow(f);
+                objs.forEach(o => forceGroup.add(o));
+              } catch (err) {
+                console.error('Failed to build force arrow', f, err);
+              }
+            });
+            catGroup.add(forceGroup);
+          } catch (err) {
+            console.error('Failed to build force group for cantilever', ci, err);
+          }
+        }
         poleGroup.add(catGroup);
       });
       this.dataGroup.add(poleGroup);
@@ -1510,21 +1530,29 @@ export class ViewerEngine {
   }
 
   private stressMode: boolean = false;
+  private forcesVisible: boolean = false;
+
+  // 4-stop Blue -> Green -> Yellow -> Red gradient. The low end is deliberately NOT
+  // the same green as a tube's default color, so heatmap mode always looks visibly
+  // different from normal mode, even at very low utilization.
+  private static readonly HEATMAP_STOPS: [number, [number, number, number]][] = [
+    [0.0, [37, 99, 235]],   // blue-600 (near-zero stress)
+    [0.33, [34, 197, 94]],  // emerald-500
+    [0.66, [234, 179, 8]],  // amber-500
+    [1.0, [239, 68, 68]],   // red-500 (at/over yield)
+  ];
 
   private utilizationToHex(utilization: number): number {
     const clamp = Math.max(0, Math.min(1, utilization));
-    let r, g, b;
-    if (clamp < 0.5) {
-      const t = clamp * 2.0;
-      r = 34 + t * (234 - 34);
-      g = 197 + t * (179 - 197);
-      b = 94 + t * (8 - 94);
-    } else {
-      const t = (clamp - 0.5) * 2.0;
-      r = 234 + t * (239 - 234);
-      g = 179 + t * (68 - 179);
-      b = 8 + t * (68 - 8);
-    }
+    const stops = ViewerEngine.HEATMAP_STOPS;
+    let i = 0;
+    while (i < stops.length - 2 && clamp > stops[i + 1][0]) i++;
+    const [t0, c0] = stops[i];
+    const [t1, c1] = stops[i + 1];
+    const t = t1 > t0 ? (clamp - t0) / (t1 - t0) : 0;
+    const r = c0[0] + t * (c1[0] - c0[0]);
+    const g = c0[1] + t * (c1[1] - c0[1]);
+    const b = c0[2] + t * (c1[2] - c0[2]);
     return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
   }
 
@@ -1537,13 +1565,78 @@ export class ViewerEngine {
           ? this.utilizationToHex(line.utilization)
           : rgbaToHex(line.color);
         
-        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshPhongMaterial) {
-          obj.material.color.setHex(color);
-        } else if (obj instanceof THREE.Line && obj.material instanceof THREE.LineBasicMaterial) {
-          obj.material.color.setHex(color);
+        if ((obj as any).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          if (mesh.material && 'color' in mesh.material) {
+            (mesh.material as any).color.setHex(color);
+          }
+        } else if ((obj as any).isLine) {
+          const lineObj = obj as THREE.Line;
+          if (lineObj.material && 'color' in lineObj.material) {
+            (lineObj.material as any).color.setHex(color);
+          }
         }
       }
     });
+  }
+
+  public setForcesVisible(enabled: boolean): void {
+    this.forcesVisible = enabled;
+    this.dataGroup.traverse((obj) => {
+      if (obj.name.startsWith('forces_')) {
+        obj.visible = enabled;
+      }
+    });
+  }
+
+  private static readonly FORCE_COLORS: Record<string, number> = {
+    'zigzag': 0xf97316,      // orange
+    'curve': 0xa855f7,       // purple
+    'wire-weight': 0x38bdf8, // sky blue
+    'tube-weight': 0x94a3b8, // slate gray
+  };
+
+  private makeForceArrow(force: ApiForce): THREE.Object3D[] {
+    const origin = new THREE.Vector3(force.point[0], force.point[1], force.point[2]);
+    const dir = new THREE.Vector3(force.direction[0], force.direction[1], force.direction[2]);
+    if (dir.lengthSq() < 1e-9) return [];
+    dir.normalize();
+
+    const color = ViewerEngine.FORCE_COLORS[force.kind] ?? 0xffffff;
+    // Scale magnitude (N) to a visible arrow length in mm, clamped to a sane range.
+    const length = Math.max(150, Math.min(2000, force.magnitude * 0.3));
+    const headLength = Math.min(120, length * 0.3);
+    const headWidth = headLength * 0.5;
+
+    const arrow = new THREE.ArrowHelper(dir, origin, length, color, headLength, headWidth);
+    arrow.layers.set(2);
+    (arrow.line.material as THREE.LineBasicMaterial).depthTest = false;
+    (arrow.cone.material as THREE.MeshBasicMaterial).depthTest = false;
+
+    // Magnitude label, offset past the arrowhead
+    const tip = origin.clone().add(dir.clone().multiplyScalar(length + 20));
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.font = 'bold 34px sans-serif';
+      ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = force.magnitude >= 1000
+        ? `${force.label}: ${(force.magnitude / 1000).toFixed(2)} kN`
+        : `${force.label}: ${force.magnitude.toFixed(0)} N`;
+      ctx.fillText(label, 256, 64);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(700, 175, 1);
+    sprite.position.copy(tip);
+    sprite.layers.set(2);
+
+    return [arrow, sprite];
   }
 
   private makeApiLine(apiLine: ApiLine): THREE.Object3D {

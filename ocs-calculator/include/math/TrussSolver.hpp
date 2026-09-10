@@ -20,6 +20,7 @@ struct TrussElement {
     int nodeB;
     double E; // Young's Modulus (MPa = N/mm^2)
     double A; // Cross-sectional area (mm^2)
+    double yield_stress; // Allowable stress for this element, MPa
 };
 
 struct TrussLoad {
@@ -47,10 +48,10 @@ public:
     TrussSolver() = default;
     
     int addNode(const Vec3& pos, bool fixed = false);
-    void addElement(int id, const std::string& name, int nodeA, int nodeB, double E, double A);
+    void addElement(int id, const std::string& name, int nodeA, int nodeB, double E, double A, double yield_stress = 215.0);
     void addLoad(int node_id, const Vec3& force);
-    
-    std::vector<TrussResult> solve(double yield_stress = 235.0) const; // 235 MPa default yield
+
+    std::vector<TrussResult> solve() const;
 };
 
 } // namespace math

@@ -6,6 +6,7 @@ namespace components {
 struct SteelTube {
     double d; // diameter
     double s; // thickness
+    double yield = 215.0; // yield stress, MPa
 };
 
 struct Isolator {

@@ -13,8 +13,8 @@ int TrussSolver::addNode(const Vec3& pos, bool fixed) {
     return id;
 }
 
-void TrussSolver::addElement(int id, const std::string& name, int nodeA, int nodeB, double E, double A) {
-    elements.push_back({id, name, nodeA, nodeB, E, A});
+void TrussSolver::addElement(int id, const std::string& name, int nodeA, int nodeB, double E, double A, double yield_stress) {
+    elements.push_back({id, name, nodeA, nodeB, E, A, yield_stress});
 }
 
 void TrussSolver::addLoad(int node_id, const Vec3& force) {
@@ -62,7 +62,7 @@ bool TrussSolver::solveLinearSystem(std::vector<std::vector<double>>& A, std::ve
     return true;
 }
 
-std::vector<TrussResult> TrussSolver::solve(double yield_stress) const {
+std::vector<TrussResult> TrussSolver::solve() const {
     if (nodes.empty()) return {};
 
     int n = nodes.size();
@@ -162,7 +162,7 @@ std::vector<TrussResult> TrussSolver::solve(double yield_stress) const {
         double dl = du_x * cx + du_y * cy + du_z * cz; // elongation
         double force = (el.E * el.A / L) * dl; // positive = tension
         double stress = force / el.A;
-        double utilization = std::abs(stress) / yield_stress;
+        double utilization = std::abs(stress) / el.yield_stress;
 
         results.push_back({el.id, force, stress, utilization});
     }

@@ -960,17 +960,22 @@ export class ViewerEngine {
         raycaster.setFromCamera(mouse, this.cam3D);
 
         const candidates: THREE.Object3D[] = [];
-        this.dynamicGroup.traverse((child) => {
-          if (child.userData?.type === 'track' && child.layers.isEnabled(2)) {
+        const collect = (child: THREE.Object3D) => {
+          const t = child.userData?.type;
+          if ((t === 'track' || t === 'pole' || t === 'cantilever') && child.layers.isEnabled(2)) {
             candidates.push(child);
           }
-        });
+        };
+        this.dynamicGroup.traverse(collect);
+        // Real calculated cantilever tube geometry lives in dataGroup (tagged in addApiData),
+        // not dynamicGroup — include it so calculated cantilevers are clickable in 3D too.
+        this.dataGroup.traverse(collect);
         const intersects = raycaster.intersectObjects(candidates, false);
         const hit = intersects.length > 0 ? intersects[0] : null;
         if (hit) {
-          const trackIdx = hit.object.userData.index;
+          const { type, index } = hit.object.userData as { type: string; index: number };
           this.container.dispatchEvent(new CustomEvent('viewer-select', {
-            detail: { minX: 0, maxX: 0, minZ: 0, maxZ: 0, isPoint: true, hovered: { type: 'track', index: trackIdx }, isWindowSelect: false }
+            detail: { minX: 0, maxX: 0, minZ: 0, maxZ: 0, isPoint: true, hovered: { type, index }, isWindowSelect: false }
           }));
         }
       }
@@ -1485,7 +1490,15 @@ export class ViewerEngine {
       pole.cantilevers.forEach((cat, ci) => {
         const catGroup = new THREE.Group();
         catGroup.name = `cat_${offset + pi}_${ci}`;
-        cat.lines.forEach((apiLine) => catGroup.add(this.makeApiLine(apiLine)));
+        // `pi` is this cantilever's index within the flat scene cantilevers[] array (each
+        // request/response now represents exactly one cantilever), used so the real
+        // calculated tube geometry is clickable/selectable in the 3D view.
+        cat.lines.forEach((apiLine) => {
+          const obj = this.makeApiLine(apiLine);
+          obj.userData.type = 'cantilever';
+          obj.userData.index = pi;
+          catGroup.add(obj);
+        });
         // Render dimension annotations (measurement arrows + labels)
         if (cat.dimensions && cat.dimensions.length > 0) {
           const dimGroup = new THREE.Group();
@@ -2325,6 +2338,7 @@ export class ViewerEngine {
       }
       mesh3d.position.set(p.x, p.y || 0, p.z || 0);
       mesh3d.layers.set(2);
+      mesh3d.userData = { type: 'pole', index: i };
       this.dynamicGroup.add(mesh3d);
     });
 
@@ -2349,18 +2363,33 @@ export class ViewerEngine {
           finalZ = rawZ + (dz / len) * zz;
         }
 
+        // Line origin: shift from the raw pole point out to the actual support-offset
+        // attachment point (only meaningful once this pole has >1 cantilevers — see
+        // `_supportOffsetActive`, set alongside the backend's own supportOffset gating).
+        let originX = c.x1, originZ = c.z1;
+        if (c._supportOffsetActive && len > 0) {
+          const offset = c.supportOffset ?? 1440;
+          originX = c.x1 + (dx / len) * offset;
+          originZ = c.z1 + (dz / len) * offset;
+        }
+
+
         // Perpendicular arm (structural)
         const geo = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(c.x1, 0, c.z1),
+          new THREE.Vector3(originX, 0, originZ),
           new THREE.Vector3(finalX, 0, finalZ)
         ]);
         const mat = new THREE.LineBasicMaterial({ color, linewidth: isSelected ? 3 : 2 });
         const line2d = new THREE.Line(geo, mat);
         line2d.layers.set(1);
+        line2d.userData = { type: 'cantilever', index: ci };
         this.dynamicGroup.add(line2d);
+        // (3D selection uses the real calculated tube geometry in `dataGroup`, tagged in
+        // addApiData — no separate 3D-only proxy line here, to avoid a visible stray line
+        // that doesn't match the actual tube shapes once calculated.)
         if (isSelected) {
           // Highlight dots at endpoints
-          [{ x: c.x1, z: c.z1 }, { x: finalX, z: finalZ }].forEach(pt => {
+          [{ x: originX, z: originZ }, { x: finalX, z: finalZ }].forEach(pt => {
             const cgeo = new THREE.CircleGeometry(120, 16);
             cgeo.rotateX(-Math.PI / 2);
             const cmat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide });
@@ -2810,9 +2839,8 @@ export class ViewerEngine {
     this.updateGrid();
   }
 
+  /** Frame a cantilever in whichever view mode is currently active — never switches mode. */
   public focusCantilever(c: { x1: number, z1: number, x2: number, z2: number, x2raw?: number, z2raw?: number, zigzag?: number, contactWireHeight?: number }): void {
-    this.setViewMode('3D');
-
     const rawX = c.x2raw ?? c.x2;
     const rawZ = c.z2raw ?? c.z2;
 
@@ -2828,6 +2856,12 @@ export class ViewerEngine {
 
     const cx = (c.x1 + finalX) / 2;
     const cz = (c.z1 + finalZ) / 2;
+
+    if (this.viewMode === '2D') {
+      this.focus2D(cx, cz, 8000);
+      return;
+    }
+
     const cy = c.contactWireHeight ? c.contactWireHeight : 6000;
 
     let px = 0, pz = 1;
@@ -2844,6 +2878,38 @@ export class ViewerEngine {
     this.cam3D.lookAt(cx, cy, cz);
     this.controls.target.set(cx, cy, cz);
     this.controls.update();
+  }
+
+  /** Frame a pole in whichever view mode is currently active — never switches mode. */
+  public focusPole(p: { x: number; z: number; y?: number; h?: number }): void {
+    const cx = p.x, cz = p.z || 0;
+
+    if (this.viewMode === '2D') {
+      this.focus2D(cx, cz, 8000);
+      return;
+    }
+
+    const poleH = p.h || 3000;
+    const cy = (p.y || 0) + poleH * 0.5;
+    const dist = Math.max(poleH * 3, 6000);
+
+    this.cam3D.position.set(cx + dist * 0.6, cy + poleH * 0.5, cz + dist);
+    this.cam3D.lookAt(cx, cy, cz);
+    this.controls.target.set(cx, cy, cz);
+    this.controls.update();
+  }
+
+  /** Pan/zoom the 2D orthographic camera to center on (cx,cz) with a given viewport half-span. */
+  private focus2D(cx: number, cz: number, halfSpan: number): void {
+    const { offsetWidth: w, offsetHeight: h } = this.container;
+    const aspect = w / h;
+    this.cam2D.left = -halfSpan * aspect;
+    this.cam2D.right = halfSpan * aspect;
+    this.cam2D.top = halfSpan;
+    this.cam2D.bottom = -halfSpan;
+    this.cam2D.zoom = 1;
+    this.cam2D.position.set(cx, -1e5, cz);
+    this.cam2D.updateProjectionMatrix();
   }
 
   /**

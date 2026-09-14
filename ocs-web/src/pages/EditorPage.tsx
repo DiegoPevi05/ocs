@@ -87,6 +87,70 @@ function closestPointOnTracks(
   return { x: footX, z: footZ, y: footY, tx, tz };
 }
 
+const POLE_MATCH_DIST = 500;
+
+/** Pole's actual (x,z) — from its linked foundation when it has one, else its own x/z. */
+function resolvePolePos(p: PoleData, foundations: FoundationData[]): { x: number; z: number } {
+  if (p.foundationIdx !== undefined && foundations[p.foundationIdx]) {
+    const f = foundations[p.foundationIdx];
+    return { x: f.x, z: f.z };
+  }
+  return { x: p.x, z: p.z || 0 };
+}
+
+/** True if a cantilever's pole-side point (x1,z1) is close enough to count as mounted on this pole. */
+function cantileverMatchesPole(c: CantileverData, p: PoleData, foundations: FoundationData[]): boolean {
+  const pos = resolvePolePos(p, foundations);
+  return Math.hypot(pos.x - c.x1, pos.z - c.z1) < POLE_MATCH_DIST;
+}
+
+/**
+ * A pole's cantilevers, in left-to-right order, as {cantileverIdx, id}.
+ * Order comes from `pole.cantileverOrder` (explicit ids, user-set via the "Reorder
+ * Cantilevers" button in PolePanel) when present; any proximity-matched cantilever not
+ * yet listed there (e.g. freshly drawn) is inserted at its position-sorted slot, projected
+ * onto its own track-tangent direction — the same axis Pole::buildAll() offsets arms along.
+ * Falls back entirely to position-sort when the pole has no explicit order yet.
+ */
+function getPoleCantileverSlots(
+  poleIdx: number,
+  poles: PoleData[],
+  cantilevers: CantileverData[],
+  foundations: FoundationData[] = []
+): { cantileverIdx: number; id: string }[] {
+  const pole = poles[poleIdx];
+  if (!pole) return [];
+
+  const matched = cantilevers
+    .map((c, idx) => ({ c, idx }))
+    .filter(({ c }) => cantileverMatchesPole(c, pole, foundations));
+  if (matched.length === 0) return [];
+
+  // Ensure every matched cantilever has a stable id to key the order by.
+  const withId = matched.map(({ c, idx }) => ({
+    idx,
+    id: c.id ?? `cant_${idx}`,
+    pos: (c.x2raw ?? c.x2) * (c.tx ?? 1) + (c.z2raw ?? c.z2) * (c.tz ?? 0),
+  }));
+
+  const order = pole.cantileverOrder ?? [];
+  const byId = new Map(withId.map(w => [w.id, w]));
+
+  const ordered: typeof withId = [];
+  order.forEach(id => {
+    const w = byId.get(id);
+    if (w) { ordered.push(w); byId.delete(id); }
+  });
+  // Anything left (new/unlisted) gets inserted in position-sorted order.
+  const remaining = Array.from(byId.values()).sort((a, b) => a.pos - b.pos);
+  remaining.forEach(w => {
+    const insertAt = ordered.findIndex(o => o.pos > w.pos);
+    if (insertAt === -1) ordered.push(w); else ordered.splice(insertAt, 0, w);
+  });
+
+  return ordered.map(w => ({ cantileverIdx: w.idx, id: w.id }));
+}
+
 // ─── Input field helper ────────────────────────────────────────────────────────
 const INP = { width: '100%', padding: '6px', marginTop: '4px', background: '#334155', border: '1px solid #475569', color: '#fff', borderRadius: 4 } as const;
 const LBL = { display: 'block', marginTop: 12, fontSize: 12, color: '#94a3b8' } as const;
@@ -402,17 +466,14 @@ export default function EditorPage() {
             calcResultsRef.current.forEach(r => engineRef.current?.addApiData(r));
 
             // Update per-cantilever cache so the edit panel shows fresh results.
-            // The batch response poles[] follow the same order as the sent cantilevers[].
-            // Reconstruct the cantileverIndex mapping using the current cantilevers state.
+            // Each cantilever is now always its own independent request/response (no more
+            // pole-level quantity multiplication), so the batch response poles[] map 1:1
+            // onto the sent cantilevers[] in order.
             const curCantis = cantileversRef.current;
-            const curPoles = polesRef.current;
-            let outIdx = 0;
             for (let ci = 0; ci < curCantis.length; ci++) {
               const c = curCantis[ci];
-              const matchPole = curPoles.find(p => Math.hypot(p.x - c.x1, p.z - c.z1) < 500);
-              const cantQty = matchPole?.cantileversQuantity ?? 1;
-              if (outIdx < data.poles.length) {
-                const bp = data.poles[outIdx];
+              if (ci < data.poles.length) {
+                const bp = data.poles[ci];
                 const bc = bp.cantilevers[0];
                 if (bc) {
                   const existing = calcByCantiIdx.current.get(ci);
@@ -426,7 +487,6 @@ export default function EditorPage() {
                   });
                 }
               }
-              outIdx += cantQty;
             }
 
             // Update panel if a cantilever is currently open
@@ -499,10 +559,24 @@ export default function EditorPage() {
       return p;
     });
 
+    // Support-offset only applies (visually and in the backend calc) once a pole has more
+    // than one cantilever — flag those here so the viewer can shift the 2D top-view line's
+    // origin from the raw pole point to the actual support-offset attachment point.
+    // Note: the pole itself, and each cantilever's own pv (perpendicular attachment to
+    // whichever track it targets), are never shifted apart — each arm already independently
+    // targets its own track correctly; only the bracket mounting distance changes with count.
+    const cantileversForViewer = cantilevers.map((c) => {
+      const poleIdx = poles.findIndex(p => cantileverMatchesPole(c, p, foundations));
+      if (poleIdx === -1) return c;
+      const slots = getPoleCantileverSlots(poleIdx, poles, cantilevers, foundations);
+      if (slots.length <= 1) return c;
+      return { ...c, _supportOffsetActive: true };
+    });
+
     engineRef.current?.setDynamicGeometry({
       foundations, selectedFoundations,
       trackPoints, poles: syncedPoles, completedTracks, selectedTracks, selectedPoles,
-      cantileverPoints: [], cantilevers, vanes, vaneFirstCantIdx,
+      cantileverPoints: [], cantilevers: cantileversForViewer, vanes, vaneFirstCantIdx,
       selectedCantilevers, selectedVanes,
       anchorPoints, anchors, anchorFirstPoleIdx,
       selectedAnchorPoints, selectedAnchors,
@@ -574,20 +648,22 @@ export default function EditorPage() {
         const vaneHalfDroppers = (v: VaneData) => (v.qtyDroppers && v.qtyDroppers > 0 ? v.qtyDroppers : 7) / 2;
         const refVane = attachedVanes[0];
         
-        const matchPole = polesRef.current.find(p => {
-          let pX = p.x;
-          let pZ = p.z || 0;
-          if (p.foundationIdx !== undefined && foundationsRef.current[p.foundationIdx]) {
-              const f = foundationsRef.current[p.foundationIdx];
-              pX = f.x;
-              pZ = f.z;
-          }
-          return Math.hypot(pX - c.x1, pZ - c.z1) < 500;
-        });
+        const matchPoleIdx = polesRef.current.findIndex(p => cantileverMatchesPole(c, p, foundationsRef.current));
+        const matchPole = matchPoleIdx !== -1 ? polesRef.current[matchPoleIdx] : undefined;
 
         const pY = (matchPole?.foundationIdx !== undefined && foundationsRef.current[matchPole.foundationIdx])
           ? (foundationsRef.current[matchPole.foundationIdx].y ?? 0)
           : (matchPole?.y ?? 0);
+
+        // This cantilever's position (slot) among its pole's siblings — drives the
+        // symmetric offset Pole::buildAll() applies so independently-drawn cantilevers
+        // on the same pole spread apart instead of overlapping.
+        const slots = matchPoleIdx !== -1
+          ? getPoleCantileverSlots(matchPoleIdx, polesRef.current, cantiList, foundationsRef.current)
+          : [];
+        const mySlot = slots.findIndex(s => s.cantileverIdx === cIdx);
+        const poleSlotIndex = mySlot !== -1 ? mySlot : 0;
+        const poleSlotCount = slots.length > 0 ? slots.length : 1;
 
         const foot = closestPointOnTracks(completedTracksRef.current, footX, footZ);
         const footY = foot.y;
@@ -608,7 +684,8 @@ export default function EditorPage() {
           curveRadiusDirection: c.curveRadiusDirection ?? 'inside',
           curveRadius: c.curveRadius ?? 0,
           trackGauge: c.trackGauge ?? 1435,
-          cantileversQuantity: matchPole?.cantileversQuantity ?? 1,
+          poleSlotIndex,
+          poleSlotCount,
           catSeparation: matchPole?.catSeparation ?? 720,
           poleWidth: matchPole?.width ?? 300,
           poleLength: matchPole?.length ?? 300,
@@ -1348,6 +1425,7 @@ export default function EditorPage() {
 
     const newC: CantileverData = {
       ...updated,
+      id: updated.id ?? crypto.randomUUID(),
       x2: cantileverModal.x2raw + ux * (updated.zigzag ?? 250),
       z2: cantileverModal.z2raw + uz * (updated.zigzag ?? 250),
       x2raw: cantileverModal.x2raw,
@@ -1357,7 +1435,20 @@ export default function EditorPage() {
     };
     setCantilevers(prev => {
       const next = [...prev, newC];
-      saveScene(completedTracksRef.current, polesRef.current, next, vanesRef.current);
+      // If this arm lands on an existing pole, default-insert it into that pole's
+      // cantilever order at its position-sorted slot (left/right of the existing arms) —
+      // the user can still manually reorder afterward from the Pole panel.
+      const matchPoleIdx = polesRef.current.findIndex(p => cantileverMatchesPole(newC, p, foundationsRef.current));
+      let nextPoles = polesRef.current;
+      if (matchPoleIdx !== -1) {
+        nextPoles = polesRef.current.map((p, i) => {
+          if (i !== matchPoleIdx) return p;
+          const slots = getPoleCantileverSlots(matchPoleIdx, polesRef.current, next, foundationsRef.current);
+          return { ...p, cantileverOrder: slots.map(s => s.id) };
+        });
+        setPoles(nextPoles);
+      }
+      saveScene(completedTracksRef.current, nextPoles, next, vanesRef.current);
       return next;
     });
     setCantileverModal(null);
@@ -1403,10 +1494,19 @@ export default function EditorPage() {
     setEditCantileverIdx(idx);
     const c = cantilevers[idx];
     if (engineRef.current) {
-      setViewMode('3D');
       setDrawMode('none');
       engineRef.current.setDrawMode('none');
       engineRef.current.focusCantilever(c);
+    }
+  };
+
+  const openEditPole = (idx: number) => {
+    if (!poles[idx]) return;
+    setEditPoleIdx(idx);
+    if (engineRef.current) {
+      setDrawMode('none');
+      engineRef.current.setDrawMode('none');
+      engineRef.current.focusPole(poles[idx]);
     }
   };
 
@@ -1643,11 +1743,32 @@ export default function EditorPage() {
                 {selectedCantilevers.length === 1 && (
                   <button onClick={() => openEditCantilever(selectedCantilevers[0])} style={{ padding: '5px 8px', background: '#f59e0b', border: 'none', color: '#000', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Cantilever</button>
                 )}
+                {selectedCantilevers.length > 1 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, textAlign: 'left' }}>
+                    <span style={{ color: '#94a3b8', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      {selectedCantilevers.length} cantilevers — pick one to edit
+                    </span>
+                    {selectedCantilevers.map(idx => (
+                      <button
+                        key={idx}
+                        onClick={() => openEditCantilever(idx)}
+                        style={{
+                          padding: '4px 8px', background: 'rgba(245,158,11,0.15)',
+                          border: '1px solid #f59e0b', color: '#f59e0b',
+                          borderRadius: 4, cursor: 'pointer', fontSize: 11,
+                          textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {cantilevers[idx]?.label || `Cantilever ${idx + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {selectedVanes.length === 1 && (
                   <button onClick={() => openEditVane(selectedVanes[0])} style={{ padding: '5px 8px', background: '#9333ea', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Vane</button>
                 )}
                 {selectedPoles.length === 1 && (
-                  <button onClick={() => setEditPoleIdx(selectedPoles[0])} style={{ padding: '5px 8px', background: 'var(--danger)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Pole</button>
+                  <button onClick={() => openEditPole(selectedPoles[0])} style={{ padding: '5px 8px', background: 'var(--danger)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Pole</button>
                 )}
                 {selectedFoundations.length === 1 && (
                   <button onClick={() => setEditFoundationIdx(selectedFoundations[0])} style={{ padding: '5px 8px', background: 'var(--success)', border: 'none', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit Foundation</button>
@@ -2075,8 +2196,15 @@ export default function EditorPage() {
           <PolePanel
             pole={poles[editPoleIdx]}
             settings={projectSettings}
+            cantileverSlots={getPoleCantileverSlots(editPoleIdx, poles, cantilevers, foundations).map(s => ({
+              id: s.id,
+              label: cantilevers[s.cantileverIdx]?.label || `Cantilever ${s.cantileverIdx + 1}`,
+            }))}
             onSave={handlePoleSave}
-            onClose={() => setEditPoleIdx(null)}
+            onClose={() => {
+              setEditPoleIdx(null);
+              engineRef.current?.resetCamera();
+            }}
           />
         )}
 
@@ -2093,8 +2221,6 @@ export default function EditorPage() {
               setEditCantileverIdx(null);
               setLastCantResults(null);
               triggerCalculation(cantilevers);
-              setViewMode('2D');
-              engineRef.current?.setViewMode('2D');
               engineRef.current?.resetCamera();
             }}
           />

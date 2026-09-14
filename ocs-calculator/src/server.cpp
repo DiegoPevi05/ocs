@@ -99,7 +99,12 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     pole3D.model = poleModel; 
     pole3D.globalPosition = polePos;
     
-    int numCantilevers = j.value("cantileversQuantity", 1);
+    // A pole's cantilevers are now each solved independently (their own request), and
+    // positioned as slot `poleSlotIndex` of `poleSlotCount` siblings on the pole — see
+    // Pole::buildAll(slotIndexOverride, slotCountOverride). Defaults (0, 1) reproduce the
+    // old single-cantilever-per-pole behavior exactly.
+    int poleSlotIndex = j.value("poleSlotIndex", 0);
+    int poleSlotCount = j.value("poleSlotCount", 1);
     double catSeparation = j.value("catSeparation", 720.0);
     double supportOffset = j.value("supportOffset", 1440.0);
     double contactWireHeight = j.value("contactWireHeight", 5400.0);
@@ -186,32 +191,32 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
     components::Track track = { trackGauge, { 50.0 } };
     components::Pole poleOrchestrator(pole3D, catSeparation, supportOffset, bottomFixedHeight, fixingDistance, 0.0, pv);
 
-    for (int i=0; i < numCantilevers; ++i) {
+    // Each cantilever is now solved independently (own config, own request) — no more
+    // even/odd mirroring of zigzag/arm-angle sign. The frontend is responsible for
+    // setting each cantilever's own zigzag/steadyArmAlpha/registerArmAlpha directly.
+    // Declared here (not block-local) so its geometry — populated by build(), called
+    // inside poleOrchestrator.buildAll() below — is still readable afterward, for the
+    // support-offset dimension annotations.
+    std::shared_ptr<assemblies::BracketTube> bracketTube;
+    {
         auto builder = std::make_shared<CantileverBuilder>(
             model, track, curveDir, pv, pole3D,
             u, supportOffset, contactWireHeight, contactWireVerticalOffset, systemHeight,
-            (i % 2 == 0) ? zigzag : -zigzag,
+            zigzag,
             fixingDistance, bottomFixedHeight
         );
-        
+
         auto stayTube = std::make_shared<assemblies::StayTube>(stayTubeParams);
-        auto bracketTube = std::make_shared<assemblies::BracketTube>(bracketTubeParams, stayTube);
-        
-        if (model.type.configuration == components::ConfigurationType::TDP_GT_2_2 || 
+        bracketTube = std::make_shared<assemblies::BracketTube>(bracketTubeParams, stayTube);
+
+        if (model.type.configuration == components::ConfigurationType::TDP_GT_2_2 ||
             model.type.configuration == components::ConfigurationType::CAI) {
-            
-            assemblies::RegisterArmParams iterRegParams = regParams;
-            if (i % 2 != 0) {
-                iterRegParams.alpha = -registerArmAlpha;
-                iterRegParams.drop_bracket_distance = 200.0;
-            }
-            auto regArm = std::make_shared<assemblies::RegisterArm>(iterRegParams);
-            
-            assemblies::SteadyArmParams iterSteady = steadyArmParams;
-            if (i % 2 != 0) iterSteady.alpha = -steadyArmAlpha;
-            auto steadyArm = std::make_shared<assemblies::SteadyArm>(iterSteady, bracketTube, regArm);
+
+            auto regArm = std::make_shared<assemblies::RegisterArm>(regParams);
+
+            auto steadyArm = std::make_shared<assemblies::SteadyArm>(steadyArmParams, bracketTube, regArm);
             builder->addAssembly(stayTube).addAssembly(bracketTube).addAssembly(regArm).addAssembly(steadyArm);
-            
+
             bool enableReinforcement = j.value("enableReinforcement", false);
             if (enableReinforcement) {
                 double reinfUpperOffset = j.value("reinforcementUpperOffset", 150.0);
@@ -224,14 +229,14 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
                 reinfParams.bottom_distance_offset = reinfBottomOffset;
                 reinfParams.bottom_eye_clamp = { 79.0 };
                 reinfParams.bottom_hook_end_fitting = { 132.0, 65.0 };
-                
+
                 auto reinf = std::make_shared<assemblies::Reinforcement>(reinfParams, stayTube, bracketTube, steadyArm);
                 builder->addAssembly(reinf);
             }
         } else {
             auto steadyArm = std::make_shared<assemblies::SteadyArm>(steadyArmParams, bracketTube, nullptr);
             builder->addAssembly(stayTube).addAssembly(bracketTube).addAssembly(steadyArm);
-            
+
             bool enableReinforcement = j.value("enableReinforcement", false);
             if (enableReinforcement) {
                 double reinfUpperOffset = j.value("reinforcementUpperOffset", 150.0);
@@ -244,25 +249,30 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
                 reinfParams.bottom_distance_offset = reinfBottomOffset;
                 reinfParams.bottom_eye_clamp = { 79.0 };
                 reinfParams.bottom_hook_end_fitting = { 132.0, 65.0 };
-                
+
                 auto reinf = std::make_shared<assemblies::Reinforcement>(reinfParams, stayTube, bracketTube, steadyArm);
                 builder->addAssembly(reinf);
             }
         }
         poleOrchestrator.addCantilever(builder);
     }
-    
+
     auto t1 = std::chrono::high_resolution_clock::now();
-    poleOrchestrator.buildAll();
+    poleOrchestrator.buildAll(poleSlotIndex, poleSlotCount);
     auto t2 = std::chrono::high_resolution_clock::now();
     calcTimeMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
     
     json jsonPoles = json::array();
     json poleObj = json::object();
     
+    // The mast is rendered from the Pole's own always-true, never-shifted pole3D — never from
+    // any individual arm's own (possibly symmetrically-offset) frame — so it stays exactly at
+    // its true configured position no matter how many cantilevers share the pole or how they're
+    // spaced. Only slot 0 sends it, so the frontend draws exactly one mast per physical pole
+    // (every request would otherwise emit an identical duplicate).
     json poleLinesJson = json::array();
-    if (!poleOrchestrator.cantilevers.empty()) {
-        auto poleLines = poleOrchestrator.cantilevers[0]->getPoleLines();
+    if (poleSlotIndex == 0) {
+        auto poleLines = poleOrchestrator.pole3D.getRenderLines();
         for (const auto& line : poleLines) poleLinesJson.push_back(line3dToJson(line));
     }
     poleObj["lines"] = poleLinesJson;
@@ -364,8 +374,9 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
         // wire/dropper self-weight produce vertical force at the CW/MW nodes.
         double halfSpanTotal = halfSpanLeft + halfSpanRight; // mm
         double halfSpanAvg = halfSpanTotal / 2.0;
-        double signedZigzag = (thisIndex % 2 == 0) ? zigzag : -zigzag;
-        double F_zigzag = (halfSpanAvg > 1e-6) ? cwTension * (signedZigzag / halfSpanAvg) : 0.0;
+        // Each cantilever now carries its own already-signed zigzag value directly
+        // (no more even/odd sign alternation across a pole's siblings).
+        double F_zigzag = (halfSpanAvg > 1e-6) ? cwTension * (zigzag / halfSpanAvg) : 0.0;
         double curveSign = (curveDir == components::CurveRadiusDirection::OUTSIDE) ? -1.0 : 1.0;
         double F_curve = (curveRadius > 1e-6) ? curveSign * cwTension * (halfSpanTotal / curveRadius) : 0.0;
         double F_cwWeight = cwWeight * halfSpanTotal * GRAV;
@@ -467,6 +478,46 @@ json buildCantileversLogic(const json& j, double& calcTimeMs) {
                     {"length", std::round(maxDist)}
                 });
             }
+
+            // Support-offset dimensions: only meaningful when this pole actually has
+            // multiple cantilevers (matches Pole::buildAll()'s own (quantity==1)?0:supportOffset
+            // rule) — shows the two halves of supportOffset either side of the support's
+            // center: pole-face-to-center, and center-to-cantilever-attachment.
+            if (poleSlotCount > 1 && supportOffset > 1e-6 && bracketTube) {
+                math::Vec3 bottomAttach = bracketTube->bottomPoleFixedPoint;
+                math::Vec3 bottomTubeStart = bracketTube->bottomFixedPoint;
+                math::Vec3 dir = math::normalize(math::subtract(bottomTubeStart, bottomAttach));
+                math::Vec3 upperAttach = poleOrchestrator.cantilevers[0]->getUpperPoleFixedPoint();
+
+                // Visual support collar radius — noticeably thicker than the tubes so it
+                // reads as a distinct bracket/collar fixture, not another tube segment.
+                double collarRadius = std::max(40.0, std::min(150.0, supportOffset * 0.15));
+
+                auto addSupportDims = [&](const math::Vec3& attach, const std::string& label) {
+                    math::Vec3 poleFace = math::subtract(attach, math::scale(dir, supportOffset));
+                    math::Vec3 center = math::subtract(attach, math::scale(dir, supportOffset / 2.0));
+                    dims.push_back(json{
+                        {"name", "Support Offset (Pole Face) - " + label},
+                        {"start", vec3ToJson(poleFace)},
+                        {"end", vec3ToJson(center)},
+                        {"length", std::round(supportOffset / 2.0)}
+                    });
+                    dims.push_back(json{
+                        {"name", "Support Offset (Cantilever) - " + label},
+                        {"start", vec3ToJson(center)},
+                        {"end", vec3ToJson(attach)},
+                        {"length", std::round(supportOffset / 2.0)}
+                    });
+                    // The support hardware itself — a solid gray collar/bracket spanning the
+                    // full pole-face-to-attachment distance, rendered as a 3D cylinder via
+                    // the existing radius>0 tube rendering path (no new frontend code needed).
+                    viewer::Line3D supportLine("Support (" + label + ")", poleFace, attach, 128, 128, 128, 255, collarRadius);
+                    cObj["lines"].push_back(line3dToJson(supportLine));
+                };
+                addSupportDims(bottomAttach, "Bottom");
+                addSupportDims(upperAttach, "Upper");
+            }
+
             cObj["dimensions"] = dims;
         }
         

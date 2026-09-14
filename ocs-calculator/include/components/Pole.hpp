@@ -37,9 +37,13 @@ public:
     // Note: The builder's `pv` and offset arguments will be overridden sequentially during buildAll()
     Pole& addCantilever(std::shared_ptr<CantileverBuilder> builder);
 
-    // Calculates the symmetrical multi-cantilever offset mathematical projections 
-    // along the perpendicular vector of the track
-    void buildAll();
+    // Calculates the symmetrical multi-cantilever offset mathematical projections
+    // along the perpendicular vector of the track.
+    // slotIndexOverride/slotCountOverride let a caller position a single cantilever
+    // (this Pole instance holds exactly one builder) as if it were slot `slotIndexOverride`
+    // of `slotCountOverride` siblings, instead of deriving quantity/index from
+    // cantilevers.size()/loop position. Defaults (-1) preserve prior behavior.
+    void buildAll(int slotIndexOverride = -1, int slotCountOverride = -1);
 
     // Fetches all the resulting hardware geometry parameters (cut lengths, diameters)
     std::vector<assemblies::TubeDimension> getAllResults() const;

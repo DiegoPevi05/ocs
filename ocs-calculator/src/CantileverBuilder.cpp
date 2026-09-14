@@ -35,7 +35,7 @@ void CantileverBuilder::updatePoleContext(
         frame->pv = newPv;
         frame->pole.polePosition = relocatedPolePos;
         frame->isRelocated = true;
-        
+
         frame->supportOffset = newSupportOffset;
         frame->fixingDistance = newFixingDistance;
         frame->bottomFixedHeight = newBottomFixedHeight;

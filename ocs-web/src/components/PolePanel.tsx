@@ -93,17 +93,41 @@ function calcSectionProps(profileType: string, width: number, length: number, th
 interface Props {
   pole: PoleData;
   settings?: ProjectSettings;
+  /** This pole's cantilevers in their current effective order (position-sorted, or
+   * pole.cantileverOrder when set) — used to display/reorder them. */
+  cantileverSlots?: { id: string; label: string }[];
   onSave: (updated: PoleData) => void;
   onClose: () => void;
 }
 
-export function PolePanel({ pole, settings, onSave, onClose }: Props) {
+export function PolePanel({ pole, settings, cantileverSlots = [], onSave, onClose }: Props) {
   const s = settings ?? DEFAULT_PROJECT_SETTINGS;
   const [form, setForm] = useState<PoleData>({ ...pole });
   const [minimized, setMinimized] = useState(false);
+  const [reordering, setReordering] = useState(false);
 
   const set = <K extends keyof PoleData>(key: K, val: PoleData[K]) =>
     setForm(f => ({ ...f, [key]: val }));
+
+  // Effective display order: explicit form.cantileverOrder when set, else the
+  // position-sorted default order passed in via cantileverSlots.
+  const orderedSlots = (() => {
+    const order = form.cantileverOrder;
+    if (!order || order.length === 0) return cantileverSlots;
+    const byId = new Map(cantileverSlots.map(cs => [cs.id, cs]));
+    const out: typeof cantileverSlots = [];
+    order.forEach(id => { const cs = byId.get(id); if (cs) { out.push(cs); byId.delete(id); } });
+    byId.forEach(cs => out.push(cs)); // any not-yet-listed slot appended at the end
+    return out;
+  })();
+
+  const moveSlot = (from: number, to: number) => {
+    if (to < 0 || to >= orderedSlots.length) return;
+    const ids = orderedSlots.map(s => s.id);
+    const [moved] = ids.splice(from, 1);
+    ids.splice(to, 0, moved);
+    set('cantileverOrder', ids);
+  };
 
   /** Re-compute section properties from current form dimensions. */
   const recompute = (pt: string, w: number, h: number, ts: number) => {
@@ -124,17 +148,9 @@ export function PolePanel({ pole, settings, onSave, onClose }: Props) {
 
   return (
     <>
-      {/* ── Overlay ── */}
-      {!minimized && (
-        <div
-            onClick={onClose}
-            style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,0.6)',
-            zIndex: 200,
-            }}
-        />
-      )}
+      {/* No full-screen overlay here (unlike a modal) — the pole panel is a slide-in side
+          panel, so the canvas behind it stays interactive: the user can still click/select
+          another pole or cantilever in the viewport while this is open. */}
 
       {/* ── Panel ── */}
       <div style={{
@@ -217,15 +233,57 @@ export function PolePanel({ pole, settings, onSave, onClose }: Props) {
           <Divider label="Catenary Configuration" />
 
           <Row>
-            <Field label="Cantilevers Quantity" hint="Number of catenary wires on this pole">
-              <input type="number" min={1} max={4} value={form.cantileversQuantity ?? 1}
-                onChange={e => set('cantileversQuantity', +e.target.value)} style={INPUT} />
+            <Field label="Cantilevers" hint="Draw arms near this pole with the Cantilever tool">
+              <div style={{ ...INPUT, display: 'flex', alignItems: 'center', color: 'var(--text)' }}>
+                {orderedSlots.length} {orderedSlots.length === 1 ? 'cantilever' : 'cantilevers'}
+              </div>
             </Field>
-            <Field label="Cat. Separation (mm)" hint="Vertical spacing between catenary wires">
+            <Field label="Cat. Separation (mm)" hint="Equidistant spacing between this pole's cantilevers">
               <input type="number" value={form.catSeparation ?? 720}
                 onChange={e => set('catSeparation', +e.target.value)} style={INPUT} />
             </Field>
           </Row>
+
+          {orderedSlots.length > 1 && (
+            <div>
+              <button
+                onClick={() => setReordering(r => !r)}
+                style={{
+                  width: '100%', padding: '6px 10px', background: 'var(--bg)',
+                  border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)',
+                  fontSize: 12, cursor: 'pointer', textAlign: 'left',
+                }}
+              >
+                {reordering ? '▾' : '▸'} Reorder Cantilevers ({orderedSlots.length})
+              </button>
+              {reordering && (
+                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {orderedSlots.map((slot, i) => (
+                    <div key={slot.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '5px 8px', background: 'var(--bg)',
+                      border: '1px solid var(--border)', borderRadius: 4,
+                    }}>
+                      <span style={{ fontSize: 10, color: 'var(--muted)', width: 16, textAlign: 'center' }}>{i + 1}</span>
+                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{slot.label}</span>
+                      <button
+                        disabled={i === 0}
+                        onClick={() => moveSlot(i, i - 1)}
+                        title="Move left"
+                        style={{ background: 'none', border: 'none', color: i === 0 ? '#334155' : 'var(--muted)', cursor: i === 0 ? 'default' : 'pointer', fontSize: 13, padding: '0 4px' }}
+                      >◀</button>
+                      <button
+                        disabled={i === orderedSlots.length - 1}
+                        onClick={() => moveSlot(i, i + 1)}
+                        title="Move right"
+                        style={{ background: 'none', border: 'none', color: i === orderedSlots.length - 1 ? '#334155' : 'var(--muted)', cursor: i === orderedSlots.length - 1 ? 'default' : 'pointer', fontSize: 13, padding: '0 4px' }}
+                      >▶</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <Divider label="Structural & Profile Properties" />
 
@@ -387,7 +445,7 @@ export function PolePanel({ pole, settings, onSave, onClose }: Props) {
             }}
           >Cancel</button>
           <button
-            onClick={() => onSave(form)}
+            onClick={() => onSave({ ...form, cantileversQuantity: orderedSlots.length || form.cantileversQuantity })}
             style={{
               padding: '7px 18px', background: 'var(--accent)',
               border: 'none', color: '#fff',

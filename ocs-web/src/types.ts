@@ -81,8 +81,9 @@ export interface PoleData {
   id?: string; label?: string;
   foundationIdx?: number;
   x: number; z: number; y?: number; h?: number;
-  cantileversQuantity?: number;  // how many catenary wires on this pole, default 1
-  catSeparation?: number;        // vertical separation between catenary wires mm, default 720
+  cantileversQuantity?: number;  // informational only — derived from matched cantilevers, not backend-driving
+  catSeparation?: number;        // spacing between this pole's cantilevers mm, default 720
+  cantileverOrder?: string[];    // ordered CantileverData.id list for this pole's arms (left-to-right); auto-derived from position when absent/incomplete
 
   // Physical & Profile Properties
   density?: number;

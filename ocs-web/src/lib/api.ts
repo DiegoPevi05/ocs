@@ -21,7 +21,10 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
     throw new Error('Unauthorized');
   }
 
-  if (!res.ok) throw new Error(`${opts?.method ?? 'GET'} ${path} → ${res.status}`);
+  if (!res.ok) {
+    const body = await res.clone().json().catch(() => null);
+    throw new Error(body?.message ?? `${opts?.method ?? 'GET'} ${path} → ${res.status}`);
+  }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
@@ -75,6 +78,12 @@ export const api = {
         `/locations/${id}/chat`,
         { method: 'POST', body: JSON.stringify({ message }) }
       ),
+
+    generate: (id: string) =>
+      req<{ message: string; updatedSceneData: string | null }>(
+        `/locations/${id}/generate`,
+        { method: 'POST' }
+      ),
   },
 
   // ─── Auth & Users ───────────────────────────────────────────────────────────
@@ -88,6 +97,22 @@ export const api = {
     list: () => req<any[]>('/users'),
     create: (data: any) => req<any>('/users', { method: 'POST', body: JSON.stringify(data) }),
     delete: (id: string) => req<void>(`/users/${id}`, { method: 'DELETE' }),
+  },
+
+  // ─── Platform settings (server-wide AI config + design criteria) ──────────────
+
+  platform: {
+    getSettings: () => req<any>('/platform/settings'),
+    saveSettings: (settings: unknown) =>
+      req<void>('/platform/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ settings: JSON.stringify(settings) }),
+      }),
+    testAi: (payload: { provider: string; apiKey: string; model: string; message: string }) =>
+      req<{ success: boolean; message: string }>('/platform/settings/test-ai', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
   },
 };
 

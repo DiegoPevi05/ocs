@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Bot, Key, Check, Eye, EyeOff, ShieldCheck, AlertTriangle, Loader2 } from 'lucide-react';
+import { Bot, Key, Check, Eye, EyeOff, ShieldCheck, AlertTriangle, Loader2, Send, FlaskConical } from 'lucide-react';
 import type { AiProvider } from '../types';
+import { api } from '../lib/api';
 
 // ─── Style tokens ─────────────────────────────────────────────────────────────
 
@@ -79,8 +80,6 @@ const PROVIDERS: {
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
-const BASE = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api`;
-
 interface PlatformAiSettings {
   provider: AiProvider;
   apiKey: string;
@@ -91,21 +90,21 @@ interface PlatformAiSettings {
 
 interface PlatformSettingsData {
   ai: PlatformAiSettings;
+  designCriteria: string;
 }
 
 async function loadPlatformSettings(): Promise<PlatformSettingsData> {
-  const res = await fetch(`${BASE}/platform/settings`);
-  if (!res.ok) throw new Error('Failed to load platform settings');
-  return res.json();
+  return api.platform.getSettings();
 }
 
 async function savePlatformSettings(data: PlatformSettingsData): Promise<void> {
-  const res = await fetch(`${BASE}/platform/settings`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ settings: JSON.stringify(data) }),
-  });
-  if (!res.ok) throw new Error('Failed to save platform settings');
+  return api.platform.saveSettings(data);
+}
+
+interface TestAiResult { success: boolean; message: string }
+
+async function testAiConnection(ai: PlatformAiSettings, message: string): Promise<TestAiResult> {
+  return api.platform.testAi({ provider: ai.provider, apiKey: ai.apiKey, model: ai.model, message });
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -125,6 +124,12 @@ export function PlatformSettingsModal({ onClose }: Props) {
     provider: 'deepseek', apiKey: '', model: 'deepseek-chat', enabled: false,
   });
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [designCriteria, setDesignCriteria] = useState('');
+  const [tab, setTab] = useState<'ai' | 'criteria'>('ai');
+
+  const [testMessage, setTestMessage] = useState('Say hello in one short sentence.');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestAiResult | null>(null);
 
   const selectedProvider = PROVIDERS.find(p => p.id === ai.provider) ?? PROVIDERS[0];
 
@@ -134,16 +139,31 @@ export function PlatformSettingsModal({ onClose }: Props) {
         const loaded = data.ai ?? {};
         setHasApiKey(!!(loaded as any).hasApiKey);
         setAi(prev => ({ ...prev, ...loaded }));
+        setDesignCriteria(data.designCriteria ?? '');
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
 
+  const handleTestAi = async () => {
+    if (!testMessage.trim() || testing) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testAiConnection(ai, testMessage.trim());
+      setTestResult(result);
+    } catch (e: any) {
+      setTestResult({ success: false, message: e.message ?? 'Test request failed.' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      await savePlatformSettings({ ai });
+      await savePlatformSettings({ ai, designCriteria });
       setSaveStatus('saved');
       setHasApiKey(!!ai.apiKey || hasApiKey);
       setTimeout(() => setSaveStatus('idle'), 2500);
@@ -169,7 +189,7 @@ export function PlatformSettingsModal({ onClose }: Props) {
         top: '50%', left: '50%',
         transform: 'translate(-50%, -50%)',
         zIndex: 501,
-        width: 'min(520px, 95vw)',
+        width: tab === 'criteria' ? 'min(760px, 95vw)' : 'min(520px, 95vw)',
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 16,
@@ -224,6 +244,55 @@ export function PlatformSettingsModal({ onClose }: Props) {
           )}
 
           {!loading && <>
+            {/* ── Tabs ── */}
+            <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 4 }}>
+              <button
+                onClick={() => setTab('ai')}
+                style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font)',
+                  background: tab === 'ai' ? 'var(--color-primary)' : 'transparent',
+                  color: tab === 'ai' ? '#fff' : 'var(--muted)',
+                }}
+              >AI Provider</button>
+              <button
+                onClick={() => setTab('criteria')}
+                style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font)',
+                  background: tab === 'criteria' ? 'var(--color-primary)' : 'transparent',
+                  color: tab === 'criteria' ? '#fff' : 'var(--muted)',
+                }}
+              >Criterios de Diseño</button>
+            </div>
+
+            {tab === 'criteria' && (
+              <>
+                <div style={{
+                  padding: '12px 14px', background: 'var(--color-secondary)',
+                  border: '1px solid var(--border)', borderRadius: 10,
+                  fontSize: 12, color: 'var(--text)', lineHeight: 1.5,
+                }}>
+                  Este documento se envía a la IA como instrucciones de diseño cada vez que
+                  chatea o genera postes, ménsulas y vanos. Edítalo en lenguaje natural
+                  (español o inglés): alturas típicas, separación entre postes, criterios de
+                  zigzag, tensiones de cable, etc. Los cambios aplican de inmediato, sin
+                  necesidad de tocar archivos ni código.
+                </div>
+                <textarea
+                  value={designCriteria}
+                  onChange={e => setDesignCriteria(e.target.value)}
+                  spellCheck={false}
+                  rows={20}
+                  style={{
+                    ...INPUT, fontFamily: 'var(--font-mono, monospace)', fontSize: 12.5,
+                    lineHeight: 1.6, resize: 'vertical', minHeight: 320,
+                  }}
+                />
+              </>
+            )}
+
+            {tab === 'ai' && <>
             {/* ── AI Provider section ── */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -321,6 +390,53 @@ export function PlatformSettingsModal({ onClose }: Props) {
               </div>
             )}
 
+            <Divider title="Test Connection" />
+
+            <div style={{
+              padding: '14px 16px', background: 'var(--surface)',
+              border: '1px solid var(--border)', borderRadius: 10,
+              display: 'flex', flexDirection: 'column', gap: 10,
+            }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+                Send a one-off test message straight to {selectedProvider.name} using {hasApiKey && !ai.apiKey ? 'the key already saved on the server' : 'the key entered above'} — useful to confirm the key and model actually work before saving.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  value={testMessage}
+                  onChange={e => setTestMessage(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleTestAi(); }}
+                  placeholder="Test message…"
+                  style={{ ...INPUT, flex: 1 }}
+                  disabled={testing}
+                />
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleTestAi}
+                  disabled={testing || !testMessage.trim() || (!ai.apiKey && !hasApiKey)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
+                >
+                  {testing
+                    ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Testing…</>
+                    : <><FlaskConical size={14} /> Test</>}
+                </button>
+              </div>
+
+              {testResult && (
+                <div style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                  padding: '10px 12px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5,
+                  background: testResult.success ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${testResult.success ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  color: testResult.success ? 'var(--success)' : 'var(--danger)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {testResult.success ? <Send size={14} style={{ flexShrink: 0, marginTop: 1 }} /> : <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </div>
+
             <a
               href={selectedProvider.docsUrl}
               target="_blank"
@@ -340,6 +456,7 @@ export function PlatformSettingsModal({ onClose }: Props) {
               Your API key is securely stored on the backend server and is <strong>never transmitted to the browser</strong>.
               All AI interactions are processed server-side. This configuration applies platform-wide.
             </div>
+            </>}
           </>}
         </div>
 

@@ -1,0 +1,52 @@
+# Criterios de Diseño OCS — Generación Automática con IA
+
+Este documento contiene las reglas que la IA debe seguir al generar o proponer
+postes, ménsulas (cantilevers) y vanos a partir de las vías y fundaciones
+existentes en el proyecto. Guardar este texto en Platform Settings → pestaña
+"Criterios de Diseño".
+
+## 1. Postes
+
+- Al generar un poste nuevo, usar siempre la configuración de poste por
+  defecto del proyecto (perfil, dimensiones y material estándar). No
+  personalizar el perfil del poste salvo que se indique explícitamente lo
+  contrario para un caso puntual.
+
+## 2. Ménsulas (Cantilevers) — Alternancia TDP / CAI
+
+- Debe existir siempre alternancia entre postes consecutivos: uno en
+  configuración de **tracción (TDP)** y el siguiente en **compresión (CAI)**,
+  intercalados a lo largo de la vía. Este intercalado es lo que mantiene el
+  zigzag del hilo de contacto.
+- Excepción — vías en curva: en tramos curvos se permite omitir el
+  intercalado estricto y usar la configuración que más convenga según la
+  posición del poste respecto a la curva:
+  - Poste por **fuera** de la curva → usualmente **tracción (TDP)**.
+  - Poste por **dentro** de la curva → usualmente **compresión (CAI)**.
+  - Esta decisión depende del criterio de diseño de cada caso concreto (radio
+    de curvatura, geometría del tramo, etc.), no es una regla rígida.
+
+## 3. Zigzag mínimo (descentramiento)
+
+- El descentramiento (zigzag) del hilo de contacto respecto al eje de la vía
+  es de **250 mm máximo a cada lado** en este proyecto.
+- Nunca debe superarse ese valor en ningún poste/ménsula generado.
+- Para lograrlo, se pueden ajustar otros parámetros de los elementos
+  (posición del poste, offset de soporte, longitud de ménsula, ángulo, etc.)
+  — el zigzag es la restricción dura, el resto de parámetros son ajustables.
+
+## 4. Postes/fundaciones intermedios cuando la separación es excesiva
+
+- Si la distancia entre dos postes consecutivos es tan grande que no es
+  posible mantener el descentramiento máximo de 250 mm (por la separación
+  entre las fundaciones/postes existentes), se debe:
+  1. Agregar una nueva fundación entre ambos postes.
+  2. Agregar un nuevo poste sobre esa fundación.
+  3. Continuar el intercalado TDP/CAI normalmente a partir del poste
+     agregado.
+
+---
+
+*Documento inicial — se irán agregando más criterios de diseño según se
+definan (alturas de hilo de contacto, tensiones de cable, separación de
+postes por defecto, cargas de viento/hielo, etc.).*

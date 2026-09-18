@@ -36,6 +36,7 @@
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/shared/GlobalExceptionHandler.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/tracks/Track.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/tracks/TrackRepository.java
+/home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/AdminUserSeeder.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/Role.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/User.java
 /home/fares00/documents/projects/ocs/ocs-api/src/main/java/com/ocs/api/users/UserController.java

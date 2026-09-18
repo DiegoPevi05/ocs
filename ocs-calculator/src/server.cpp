@@ -707,7 +707,11 @@ int main() {
     });
 
     std::cout << "Starting C++ Catenary REST API on port 8081..." << std::endl;
-    svr.listen("0.0.0.0", 8081);
+    if (!svr.listen("0.0.0.0", 8081)) {
+        std::cerr << "Failed to start server on port 8081 — is another instance "
+                  << "already running, or is the port in use by another process?" << std::endl;
+        return 1;
+    }
 
     return 0;
 }

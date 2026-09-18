@@ -3,6 +3,8 @@ package com.ocs.api.platform;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.ocs.api.ai.AiService;
+import com.ocs.api.ai.AiSettings;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,9 +22,12 @@ import org.springframework.web.bind.annotation.*;
 public class PlatformSettingsController {
 
     private final PlatformSettingsService service;
+    private final AiService aiService;
     private final ObjectMapper mapper;
 
     record SettingsRequest(String settings) {}
+    record TestAiRequest(String provider, String apiKey, String model, String message) {}
+    record TestAiResponse(boolean success, String message) {}
 
     /**
      * Returns the platform settings. The API key is masked for security
@@ -31,9 +36,11 @@ public class PlatformSettingsController {
     @GetMapping("/settings")
     public ResponseEntity<JsonNode> getSettings() {
         try {
-            JsonNode root = mapper.readTree(service.getRawSettings());
+            JsonNode parsed = mapper.readTree(service.getRawSettings());
+            ObjectNode obj = (parsed instanceof ObjectNode o) ? o : mapper.createObjectNode();
+
             // Mask the API key before returning to the frontend
-            if (root instanceof ObjectNode obj && obj.path("ai").isObject()) {
+            if (obj.path("ai").isObject()) {
                 ObjectNode ai = (ObjectNode) obj.path("ai");
                 if (ai.has("apiKey") && !ai.path("apiKey").asText("").isBlank()) {
                     ai.put("apiKey", "••••••••••••••••");
@@ -42,7 +49,14 @@ public class PlatformSettingsController {
                     ai.put("hasApiKey", false);
                 }
             }
-            return ResponseEntity.ok(root);
+
+            // Always include a design-criteria value (falls back to the bundled default
+            // document until an admin saves a custom one), so the editor never shows blank.
+            if (obj.path("designCriteria").asText("").isBlank()) {
+                obj.put("designCriteria", service.getDesignCriteria());
+            }
+
+            return ResponseEntity.ok(obj);
         } catch (Exception e) {
             return ResponseEntity.ok(mapper.createObjectNode());
         }
@@ -74,6 +88,34 @@ public class PlatformSettingsController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
         }
+    }
+
+    /**
+     * Sends a small test message to the configured (or given) AI provider so an admin can
+     * verify the API key/model works before saving, straight from Platform Settings.
+     * If apiKey is blank or still the masked placeholder, the currently stored key is used
+     * instead, so the admin can test an already-saved key without retyping it.
+     */
+    @PostMapping("/settings/test-ai")
+    public ResponseEntity<TestAiResponse> testAi(@RequestBody TestAiRequest req) {
+        String apiKey = req.apiKey();
+        if (apiKey == null || apiKey.isBlank() || apiKey.startsWith("••")) {
+            apiKey = service.getAiSettings().apiKey();
+        }
+        if (apiKey == null || apiKey.isBlank()) {
+            return ResponseEntity.ok(new TestAiResponse(false,
+                    "No API key configured yet. Enter one above and try again."));
+        }
+
+        String provider = (req.provider() != null && !req.provider().isBlank()) ? req.provider() : AiSettings.DEFAULT_PROVIDER;
+        String model = (req.model() != null && !req.model().isBlank()) ? req.model() : AiSettings.DEFAULT_MODEL;
+        String message = (req.message() != null && !req.message().isBlank()) ? req.message() : "Say hello in one short sentence.";
+
+        AiSettings testSettings = new AiSettings(provider, apiKey, model);
+        // Blocking on purpose — see AiController.chat() for why (async Mono dispatch drops
+        // the ThreadLocal SecurityContext in this servlet-based Spring MVC app).
+        AiService.TestResult result = aiService.testConnection(testSettings, message).block();
+        return ResponseEntity.ok(new TestAiResponse(result.success(), result.message()));
     }
 
     /** Lightweight status endpoint — used by the frontend to know if AI is configured. */

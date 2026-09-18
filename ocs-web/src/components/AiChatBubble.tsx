@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageCircle, X, Send, Bot, User, Loader2, Sparkles, AlertTriangle } from 'lucide-react';
+import { MessageCircle, X, Send, Bot, User, Loader2, Sparkles, AlertTriangle, Wand2 } from 'lucide-react';
+import { api } from '../lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,22 +19,17 @@ interface AiChatBubbleProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const BASE = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api`;
-
 async function sendChatMessage(
   locationId: string,
   message: string
 ): Promise<{ message: string; updatedSceneData: string | null }> {
-  const res = await fetch(`${BASE}/locations/${locationId}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: `API Error ${res.status}` }));
-    throw new Error(err.message ?? `Error ${res.status}`);
-  }
-  return res.json();
+  return api.locations.chat(locationId, message);
+}
+
+async function sendGenerateRequest(
+  locationId: string
+): Promise<{ message: string; updatedSceneData: string | null }> {
+  return api.locations.generate(locationId);
 }
 
 function uid() {
@@ -125,6 +121,37 @@ export function AiChatBubble({ locationId, onSceneUpdated }: AiChatBubbleProps) 
     }
   };
 
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerate = useCallback(async () => {
+    if (loading || generating) return;
+    setGenerating(true);
+    const userMsg: ChatMessage = {
+      id: uid(), role: 'user',
+      content: '✨ Generar postes, ménsulas y vanos automáticamente a partir de las vías y fundaciones existentes.',
+      ts: new Date(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    try {
+      const result = await sendGenerateRequest(locationId);
+      const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: result.message, ts: new Date() };
+      setMessages(prev => [...prev, assistantMsg]);
+      if (result.updatedSceneData) {
+        onSceneUpdated(result.updatedSceneData);
+      }
+    } catch (err: any) {
+      const errMsg: ChatMessage = {
+        id: uid(), role: 'error',
+        content: err.message ?? 'An unexpected error occurred.',
+        ts: new Date(),
+      };
+      setMessages(prev => [...prev, errMsg]);
+    } finally {
+      setGenerating(false);
+    }
+  }, [loading, generating, locationId, onSceneUpdated]);
+
   const showSuggestions = messages.length === 1; // only after the welcome message
 
   return (
@@ -156,6 +183,20 @@ export function AiChatBubble({ locationId, onSceneUpdated }: AiChatBubbleProps) 
             </div>
             <button className="ai-chat-close" onClick={() => setOpen(false)} aria-label="Close">
               <X size={16} />
+            </button>
+          </div>
+
+          {/* Bulk-generate action */}
+          <div className="ai-chat-generate-row">
+            <button
+              className="ai-chat-generate-btn"
+              onClick={handleGenerate}
+              disabled={loading || generating}
+              title="Generar postes, ménsulas y vanos a partir de las vías y fundaciones existentes"
+            >
+              {generating
+                ? <><Loader2 size={15} className="ai-spin" /> Generando…</>
+                : <><Wand2 size={15} /> Generar postes / ménsulas / vanos</>}
             </button>
           </div>
 

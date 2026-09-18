@@ -6,14 +6,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ocs.api.locations.Location;
 import com.ocs.api.locations.LocationRepository;
+import com.ocs.api.platform.PlatformSettingsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
@@ -29,8 +29,25 @@ public class AiService {
     private final LocationRepository locationRepository;
     private final OcsAiTools ocsAiTools;
     private final ObjectMapper mapper;
+    private final PlatformSettingsService platformSettingsService;
 
     public record ChatResponse(String message, String updatedSceneData) {}
+
+    /**
+     * Fixed instruction used by the one-click "Generate" flow — asks the AI to fill in
+     * whatever poles/cantilevers/vanes are missing for the scene's existing tracks and
+     * foundations, instead of requiring the user to type a chat message.
+     */
+    private static final String GENERATE_INSTRUCTION =
+            "Para cada via (track) y fundacion (foundation) de esta escena que aun no tenga un poste, " +
+            "mensula (cantilever) y vano (vane) adecuados, genera los postes, mensulas y vanos necesarios " +
+            "para completar el sistema de catenaria, siguiendo los criterios de diseno indicados arriba. " +
+            "No dupliques elementos que ya existan y sean adecuados para una via o fundacion.";
+
+    /** One-click bulk generation: same pipeline as chat(), with a fixed instruction. */
+    public Mono<ChatResponse> generate(UUID locationId, AiSettings aiSettings) {
+        return chat(locationId, GENERATE_INSTRUCTION, aiSettings);
+    }
 
     public Mono<ChatResponse> chat(UUID locationId, String userMessage, AiSettings aiSettings) {
         // 1. Load location
@@ -71,8 +88,59 @@ public class AiService {
                 .flatMap(response -> handleResponse(response, finalSceneData, location))
                 .onErrorResume(e -> {
                     log.error("AI API call failed", e);
-                    return Mono.just(new ChatResponse("AI service error: " + e.getMessage(), location.getSceneData()));
+                    return Mono.just(new ChatResponse("AI service error: " + describeError(e), location.getSceneData()));
                 });
+    }
+
+    public record TestResult(boolean success, String message) {}
+
+    /**
+     * Sends a minimal chat completion request (no tools, no scene data) so the admin can
+     * verify a provider/API key/model combination from Platform Settings before saving it
+     * for real use, and see the exact upstream error if it fails.
+     */
+    public Mono<TestResult> testConnection(AiSettings aiSettings, String userMessage) {
+        ObjectNode requestBody = mapper.createObjectNode();
+        requestBody.put("model", aiSettings.model());
+        ArrayNode messages = mapper.createArrayNode();
+        ObjectNode userMsg = mapper.createObjectNode();
+        userMsg.put("role", "user");
+        userMsg.put("content", userMessage);
+        messages.add(userMsg);
+        requestBody.set("messages", messages);
+
+        WebClient client = WebClient.builder()
+                .baseUrl(AiSettings.DEEPSEEK_BASE_URL)
+                .defaultHeader("Authorization", "Bearer " + aiSettings.apiKey())
+                .defaultHeader("Content-Type", "application/json")
+                .build();
+
+        return client.post()
+                .uri("/chat/completions")
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .map(response -> {
+                    String content = response.path("choices").path(0).path("message").path("content").asText("");
+                    return new TestResult(true, content.isBlank()
+                            ? "Connected, but the model returned an empty response."
+                            : content);
+                })
+                .onErrorResume(e -> {
+                    log.error("AI test connection failed", e);
+                    return Mono.just(new TestResult(false, describeError(e)));
+                });
+    }
+
+    /** Turns a WebClient failure into a message that shows the real upstream cause (status + body). */
+    private String describeError(Throwable e) {
+        if (e instanceof WebClientResponseException wcre) {
+            String body = wcre.getResponseBodyAsString();
+            String summary = (body == null || body.isBlank()) ? "(no response body)"
+                    : (body.length() > 500 ? body.substring(0, 500) + "..." : body);
+            return "HTTP " + wcre.getStatusCode().value() + " from AI provider: " + summary;
+        }
+        return e.getMessage();
     }
 
     private Mono<ChatResponse> handleResponse(JsonNode response, ObjectNode sceneData, Location location) {
@@ -192,15 +260,9 @@ public class AiService {
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
+    /** Design-criteria document — editable from Platform Settings in the UI; see
+     *  PlatformSettingsService.getDesignCriteria() for the DB-value-or-bundled-default logic. */
     private String loadGuidance() {
-        try {
-            ClassPathResource resource = new ClassPathResource("ai/ai_guidance.md");
-            return resource.getContentAsString(StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            log.warn("Could not load ai/ai_guidance.md from classpath, using default system prompt.");
-            return "You are an OCS (Overhead Contact System) design assistant. " +
-                   "Help the user design tracks, foundations, poles, cantilevers, and vanes " +
-                   "following standard railway electrification engineering rules.";
-        }
+        return platformSettingsService.getDesignCriteria();
     }
 }

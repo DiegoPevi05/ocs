@@ -614,6 +614,42 @@ body {
   background: rgba(255,255,255,0.06);
 }
 
+/* Bulk-generate action */
+.ai-chat-generate-row {
+  padding: 10px 12px 0;
+  flex-shrink: 0;
+}
+
+.ai-chat-generate-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: linear-gradient(135deg, #9333ea, #6366f1);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.ai-chat-generate-btn:hover:not(:disabled) {
+  opacity: 0.92;
+}
+
+.ai-chat-generate-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.ai-chat-generate-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* Messages area */
 .ai-chat-messages {
   flex: 1;

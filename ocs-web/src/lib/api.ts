@@ -26,7 +26,9 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
     throw new Error(body?.message ?? `${opts?.method ?? 'GET'} ${path} → ${res.status}`);
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
@@ -113,6 +115,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+    getAiStatus: () =>
+      req<{ enabled: boolean; hasApiKey: boolean; provider: string; model: string }>('/platform/settings/ai-status'),
   },
 };
 

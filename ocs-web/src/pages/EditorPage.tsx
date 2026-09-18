@@ -442,8 +442,7 @@ export default function EditorPage() {
       .finally(() => setIsLoading(false));
 
     // Fetch platform AI enabled status (independent of project)
-    fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}/api/platform/settings/ai-status`)
-      .then(r => r.ok ? r.json() : null)
+    api.platform.getAiStatus()
       .then(status => { if (status?.enabled) setPlatformAiEnabled(true); })
       .catch(() => { /* AI optional — fail silently */ });
   }, [locationId]);
@@ -2323,7 +2322,11 @@ export default function EditorPage() {
             // Parse and reload the scene when the AI modifies it
             try {
               const newScene: SceneData = JSON.parse(updatedSceneData);
-              setCompletedTracks(newScene.tracks ?? []);
+              setCompletedTracks(
+                (newScene.tracks ?? [])
+                  .filter(t => Array.isArray(t.points))
+                  .map(t => t.points.map(p => ({ ...p, label: t.label })))
+              );
               setPoles(newScene.poles ?? []);
               setFoundations(newScene.foundations ?? []);
               setCantilevers(newScene.cantilevers ?? []);

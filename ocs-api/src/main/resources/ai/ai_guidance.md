@@ -2,10 +2,15 @@
 
 This document outlines the engineering rules, spacing requirements, and design constraints for the Overhead Contact System (OCS) project. Use these guidelines to inform automated design decisions, clash detection, and layout generation.
 
+## 0. Units and Precedence
+*   **All coordinates and distances in sceneData are in millimeters (mm)**, even though the JSON fields carry no unit suffix. Convert every figure below (given in feet/meters/inches) to millimeters before comparing against or writing scene values — e.g. the 61 m tangent span maximum is 61000 mm, the 6.55 m nominal contact wire height is 6550 mm.
+*   If this system prompt also includes a "Project-specific configured defaults" block, those exact values (contact wire height, system height, zigzag, tensions, etc.) take precedence over the nominal/example values in this document for that project — this document's numbers are generic fallbacks, not a specific project's real configuration.
+
 ## 1. Track & Alignment Rules
 *   **Track Centerline:** All OCS structures must be referenced from the adjacent track centerline.
 *   **Superelevation (Cant):** Structure locations must account for track superelevation. Minimum clearances must be maintained assuming maximum vehicle sway at maximum superelevation.
 *   **Curve Radii:** Maximum span lengths must be reduced on curves to maintain contact wire stagger within allowable limits.
+*   **Perpendicular offset is automatic:** when you call create_foundation/create_pole with an approximate x/z near the track (including on curved segments), the system automatically snaps it to the correct position perpendicular to the track's actual local direction at that point, at the standard across-track offset. You do not need to compute the exact perpendicular position or account for curve geometry yourself — just indicate roughly where along the alignment (and which side) you want it.
 
 ## 2. Spacing Requirements (Span Lengths)
 *   **Maximum Span Length (Tangent):** 200 feet (61 meters).

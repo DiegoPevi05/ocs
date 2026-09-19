@@ -13,9 +13,9 @@ This document outlines the engineering rules, spacing requirements, and design c
 *   **Perpendicular offset is automatic:** when you call create_foundation/create_pole with an approximate x/z near the track (including on curved segments), the system automatically snaps it to the correct position perpendicular to the track's actual local direction at that point, at the standard across-track offset. You do not need to compute the exact perpendicular position or account for curve geometry yourself — just indicate roughly where along the alignment (and which side) you want it.
 
 ## 2. Spacing Requirements (Span Lengths)
-*   **Maximum Span Length (Tangent):** 200 feet (61 meters).
-*   **Typical Span Length:** 150-180 feet (45-55 meters) depending on wind loading and system tension.
-*   **Span Reduction on Curves:** Span length is determined based on allowable stagger and curve radius.
+*   **Maximum Span Length (Tangent):** 200 feet = 61000 mm.
+*   **Typical Span Length: 45000-55000 mm (45-55 m).** Use this as your target spacing between consecutive poles along a track, not the 61000 mm maximum — the maximum is an upper bound, not a design target. For a straight track of length L mm, aim for roughly L / 50000 poles, evenly spaced.
+*   **Span Reduction on Curves:** on curved sections, reduce spacing below the typical value — aim for the lower end of the typical range or below depending on how tight the curve is.
 
 ## 3. Clearances and Contact Wire Parameters
 *   **Nominal Contact Wire Height:** 21 feet 6 inches (6.55 meters) above Top of Rail (TOR).
@@ -41,6 +41,7 @@ This document outlines the engineering rules, spacing requirements, and design c
 ### 4.3 Cantilevers
 *   **Type:** Tubular steel or aluminum depending on system design.
 *   **Registration Assembly:** Must provide vertical uplift allowance for pantograph passage (typically 2-4 inches).
+*   **TDP/CAI alternation is automatic:** create_cantilever decides tension (TDP) vs compression (CAI) — and the matching zigzag/stagger direction — for you, from the real track geometry: on a curve, whichever side is outside the curve gets TDP and inside gets CAI; on tangent track it alternates from the previously-created cantilever so the zigzag pattern continues along the route. You do not need to (and cannot) choose this yourself — just create one cantilever per pole.
 
 ### 4.4 Vanes / Registration Arms
 *   **Clearances:** Ensure registration arms, vanes, and steady arms do not clash with the passing pantograph envelope under all operating conditions (uplift, sway, wind).

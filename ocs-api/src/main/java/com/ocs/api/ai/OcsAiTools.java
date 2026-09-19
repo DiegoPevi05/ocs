@@ -55,7 +55,9 @@ public class OcsAiTools {
         return sceneData;
     }
 
-    private record TrackFoot(double x, double z, double y, double tx, double tz) {}
+    /** curveRadius is 0 when the closest point fell on a straight segment (not inside any arc). */
+    private record TrackFoot(double x, double z, double y, double tx, double tz,
+                              double curveRadius, double curveCenterX, double curveCenterZ) {}
 
     private void snapToTrackOffset(ObjectNode entityData, JsonNode tracks) {
         if (!entityData.has("x") || !entityData.has("z")) return;
@@ -84,6 +86,7 @@ public class OcsAiTools {
      */
     private TrackFoot closestPointOnTracks(JsonNode tracks, double px, double pz) {
         double footX = px, footZ = pz, footY = 0, minDist = Double.MAX_VALUE, tx = 1, tz = 0;
+        double curveRadius = 0, curveCenterX = 0, curveCenterZ = 0;
 
         for (JsonNode track : tracks) {
             JsonNode points = track.path("points");
@@ -123,6 +126,7 @@ public class OcsAiTools {
                                 tx = tLen > 0 ? tDirX / tLen : 1;
                                 tz = tLen > 0 ? tDirZ / tLen : 0;
                                 footY = prevY + (currY - prevY) * (s / 64.0);
+                                curveRadius = R; curveCenterX = cx; curveCenterZ = cz;
                             }
                         }
                         continue;
@@ -141,11 +145,12 @@ public class OcsAiTools {
                     tx = len > 0 ? dx / len : 1;
                     tz = len > 0 ? dz / len : 0;
                     footY = prevY + (currY - prevY) * t;
+                    curveRadius = 0; curveCenterX = 0; curveCenterZ = 0;
                 }
             }
         }
 
-        return new TrackFoot(footX, footZ, footY, tx, tz);
+        return new TrackFoot(footX, footZ, footY, tx, tz, curveRadius, curveCenterX, curveCenterZ);
     }
 
     /**
@@ -155,28 +160,37 @@ public class OcsAiTools {
      * not a missing-information problem, so no amount of clearer prompting reliably fixes it, and
      * a loose plausibility range isn't tight enough either (12 technically "looks" plausible).
      * These fields should essentially always equal the project's real configuration, so force
-     * them to it exactly rather than just validating.
+     * them to it exactly rather than just validating. TDP/CAI (and the matching zigzag sign) and
+     * the track-foot geometry are decided in assignConfigurationAndGeometry() below, for the same
+     * reason — the AI kept picking the same configuration for every pole instead of alternating,
+     * and got curves backwards.
      */
     public ObjectNode createCantilever(ObjectNode sceneData, ObjectNode cantileverData, JsonNode cantileverDefaults) {
         resolveExact(cantileverData, "contactWireHeight", cantileverDefaults, "contactWireHeight", 5400);
         resolveExact(cantileverData, "systemHeight", cantileverDefaults, "systemHeight", 1000);
-        resolveExactSigned(cantileverData, "zigzag", cantileverDefaults, "zigzag", 250);
         snapToNearestPole(cantileverData, sceneData.path("poles"));
-        computeCantileverTrackFoot(cantileverData, sceneData.path("tracks"));
+        assignConfigurationAndGeometry(cantileverData, sceneData.path("tracks"), sceneData.path("cantilevers"), cantileverDefaults);
         getOrCreateArray(sceneData, "cantilevers").add(cantileverData);
         return sceneData;
     }
 
     /**
-     * x2/z2 (contact wire point) and x2raw/z2raw/tx/tz (track foot + tangent) are derived from
-     * the pole position and the track's actual geometry — the same closest-point-on-polyline
-     * projection used for foundations/poles, followed by the frontend's own formula for applying
-     * zigzag (EditorPage.tsx, handleCreateFromPanel: x2 = trackFoot + zigzag along the
-     * pole-to-track axis). Left for the AI to compute, cantilevers ended up on the wrong side of
-     * the track (same root cause as the earlier foundation/pole curve-offset bug) — so this is
-     * computed here instead, using the pole position snapToNearestPole() already corrected.
+     * Decides TDP vs CAI (and the matching zigzag sign), then the track-foot geometry that
+     * depends on it, the way real OCS design does it: on a curve it's purely geometric — a pole
+     * outside the curve is tension/TDP, inside is compression/CAI (checked by comparing the
+     * pole's distance from the curve's actual center against the curve's radius). On tangent
+     * track there's no geometric cue, so it alternates from whatever the previously-created
+     * cantilever ended up with, continuing the zigzag pattern along the route. Then x2/z2
+     * (contact wire point) and x2raw/z2raw/tx/tz (track foot + tangent) are derived from the pole
+     * position, the actual track geometry, and this resolved zigzag — the same
+     * closest-point-on-polyline projection used for foundations/poles, followed by the frontend's
+     * own formula for applying zigzag (EditorPage.tsx, handleCreateFromPanel: x2 = trackFoot +
+     * zigzag along the pole-to-track axis). None of this is something the AI reliably reasons
+     * about on its own — it kept picking the same configuration for every pole and got curves
+     * backwards — so it's all computed here from the real geometry and creation order instead.
      */
-    private void computeCantileverTrackFoot(ObjectNode cantileverData, JsonNode tracks) {
+    private void assignConfigurationAndGeometry(ObjectNode cantileverData, JsonNode tracks,
+                                                 JsonNode existingCantilevers, JsonNode cantileverDefaults) {
         if (!cantileverData.has("x1") || !cantileverData.has("z1")) return;
         if (tracks == null || !tracks.isArray() || tracks.isEmpty()) return;
 
@@ -184,11 +198,28 @@ public class OcsAiTools {
         double z1 = cantileverData.path("z1").asDouble();
         TrackFoot foot = closestPointOnTracks(tracks, x1, z1);
 
+        double zigzagMagnitude = Math.abs((cantileverDefaults != null && cantileverDefaults.has("zigzag"))
+                ? cantileverDefaults.path("zigzag").asDouble(250) : 250);
+
+        boolean cai;
+        if (foot.curveRadius() > 1) {
+            double distFromCenter = Math.hypot(x1 - foot.curveCenterX(), z1 - foot.curveCenterZ());
+            cai = distFromCenter < foot.curveRadius(); // closer to center than the track = inside the curve
+        } else {
+            boolean lastWasCai = false;
+            if (existingCantilevers.isArray() && existingCantilevers.size() > 0) {
+                lastWasCai = existingCantilevers.get(existingCantilevers.size() - 1).path("zigzag").asDouble(-1) > 0;
+            }
+            cai = !lastWasCai;
+        }
+        double zigzag = cai ? zigzagMagnitude : -zigzagMagnitude;
+        cantileverData.put("configuration", cai ? "CAI" : "TDP>2.2");
+        cantileverData.put("zigzag", zigzag);
+
         double dx = foot.x() - x1, dz = foot.z() - z1;
         double len = Math.hypot(dx, dz);
         double ux = len > 0 ? dx / len : 1;
         double uz = len > 0 ? dz / len : 0;
-        double zigzag = cantileverData.path("zigzag").asDouble(250);
 
         cantileverData.put("x2raw", foot.x());
         cantileverData.put("z2raw", foot.z());

@@ -342,13 +342,16 @@ public class AiService {
         tools.add(buildTool("create_cantilever",
                 "Creates a cantilever attached to a pole that positions the contact wire over a track. " +
                 "Give an approximate x1/z1 near the pole it belongs to (it snaps to the nearest real pole " +
-                "automatically) — the exact track-foot geometry (x2/z2, x2raw/z2raw, tx/tz) is computed " +
-                "automatically from that pole and the actual track, do not try to compute or supply it. " +
-                "contactWireHeight, systemHeight, and zigzag are also enforced to the project's configured " +
-                "values regardless of what you provide, except zigzag's sign, which you control for " +
-                "TDP/CAI alternation (positive vs negative).",
-                buildSchema("The arguments ARE the cantilever object: x1/z1 (approximate pole position), " +
-                        "zigzag (sign only matters), configuration, etc. — put these fields directly at the top level.")));
+                "automatically). Everything else about how it registers the wire is decided automatically " +
+                "from the real track geometry and project configuration, and will overwrite whatever you " +
+                "provide, so do not try to compute or supply it: contactWireHeight and systemHeight are set " +
+                "to the project's configured values; the track-foot geometry (x2/z2, x2raw/z2raw, tx/tz) is " +
+                "computed from the pole and the actual track; and configuration (TDP vs CAI) plus the " +
+                "matching zigzag sign are decided from real geometry — on a curve, outside the curve is " +
+                "TDP and inside is CAI; on tangent track it alternates from the previously-created " +
+                "cantilever. You do not need to (and cannot) control any of that.",
+                buildSchema("The arguments ARE the cantilever object: x1/z1 (approximate pole position) is " +
+                        "what matters — put these fields directly at the top level.")));
         tools.add(buildTool("create_vane",
                 "Creates a vane (catenary wire span) connecting two cantilevers. You only need to provide " +
                 "cantileverIdx1/cantileverIdx2 plus any overrides — the geometry (x1/z1/x2/z2) is computed " +
